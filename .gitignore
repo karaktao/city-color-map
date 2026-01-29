@@ -1,0 +1,30 @@
+# docs / notes
+/~$记事板.docx
+/记事板.docx
+/记事板.txt
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# venv
+venv/
+.venv/
+
+# local data (do not upload)
+data/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# logs
+*.log

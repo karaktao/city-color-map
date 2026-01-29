@@ -1,0 +1,12 @@
+torch
+torchvision
+mmsegmentation
+mmengine
+openmim
+opencv-python
+scikit-learn
+pillow
+numpy
+tqdm
+pyyaml
+requests
