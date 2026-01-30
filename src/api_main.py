@@ -1,45 +1,50 @@
 # api_main.py
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles  
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 import json
 
-# 导入你的脚本模块
+# Import your script modules
+# NOTE: segmentation is imported lazily to avoid loading torch/mmcv at startup
 from src.preprocess import download_images
 from src.preprocess import parse_json
 from src.api_fetch import fetch_images
-from src.segmentation import segment_building
 from src.geojson_builder import build_geojson
-import os
 
 
 app = FastAPI()
 
-# 确定项目根目录
+# ==========================================================
+# ✅ Projects root directory:
+# Use "projects" under the repository root for both local and container environments.
+# In Docker, if you put projects into .dockerignore, this directory may not exist,
+# but the server can still start normally.
+# ==========================================================
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = BASE_DIR / "projects"
 
-# 允许所有来源访问
+# Mount static resources only if the directory exists
+# (otherwise the container may crash on startup)
+if PROJECT_ROOT.exists():
+    app.mount(
+        "/static/projects",
+        StaticFiles(directory=str(PROJECT_ROOT)),
+        name="projects_static",
+    )
+
+# Allow all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # 允许所有前端来源 (localhost:5173 等)
+    allow_origins=["*"],      # allow all frontend origins (e.g., localhost:5173)
     allow_credentials=True,
-    allow_methods=["*"],      # 允许所有方法 (GET, POST 等)
-    allow_headers=["*"],      # 允许所有 Header
+    allow_methods=["*"],      # allow all methods (GET, POST, etc.)
+    allow_headers=["*"],      # allow all headers
 )
 
-# ==========================================================
-# ❗关键修复：挂载静态资源目录
-# 前端访问 http://localhost:8000/static/projects/xxx/data/palettes/xxx.png
-# 实际上读取的是 D:/.../projects/xxx/data/palettes/xxx.png
-# ==========================================================
-app.mount("/static/projects", StaticFiles(directory=PROJECT_ROOT), name="projects_static")
-
-
-# ---------- Body 模型 ----------
+# ---------- Request body models ----------
 class InitProjectBody(BaseModel):
     project_name: str
 
@@ -50,45 +55,40 @@ class BBoxBody(BaseModel):
 class ProjectBody(BaseModel):
     project_name: str
 
-# ---------- 获取所有项目列表 ----------
+# ---------- List all projects ----------
 @app.get("/api/projects")
 def list_projects():
-    """列出 projects 目录下所有的文件夹名称"""
+    """List all folder names under the projects directory."""
     if not PROJECT_ROOT.exists():
         return {"projects": []}
-    
-    # 扫描目录下所有文件夹
+
     projects = [
-        d.name for d in PROJECT_ROOT.iterdir() 
+        d.name for d in PROJECT_ROOT.iterdir()
         if d.is_dir() and not d.name.startswith(".")
     ]
-    # 按修改时间倒序排列（最近用的排前面）
     projects.sort(key=lambda x: (PROJECT_ROOT / x).stat().st_mtime, reverse=True)
-    
     return {"projects": projects}
 
-
-# ---------- 检查项目状态 (用于恢复进度) ----------
+# ---------- Check project status (for progress recovery) ----------
 @app.get("/api/project-status/{project_name}")
 def check_project_status(project_name: str):
-    """根据文件是否存在，判断当前进度"""
+    """Determine current progress based on whether output files exist."""
     project_dir = PROJECT_ROOT / project_name
     data_dir = project_dir / "data"
-    
-    # 状态标记
+
     status = {
         "exists": project_dir.exists(),
         "bbox": None,
         "bbox_code": None,
-        "meta_ready": False,    # 是否有 images_meta.csv
-        "process_ready": False, # 是否有 masks 或 palettes
-        "geojson_ready": False  # 是否有 geojson
+        "meta_ready": False,
+        "process_ready": False,
+        "geojson_ready": False
     }
 
     if not status["exists"]:
         return status
 
-    # 1. 检查 BBOX (config.json)
+    # 1) Check BBOX (config.json)
     config_path = project_dir / "config.json"
     if config_path.exists():
         try:
@@ -96,28 +96,27 @@ def check_project_status(project_name: str):
                 cfg = json.load(f)
                 status["bbox"] = cfg.get("bbox")
                 status["bbox_code"] = cfg.get("bbox_code")
-        except:
+        except Exception:
             pass
 
-    # 2. 检查元数据 (images_meta.csv)
+    # 2) Check metadata (images_meta.csv)
     meta_csv = data_dir / "csv" / "images_meta.csv"
     if meta_csv.exists() and meta_csv.stat().st_size > 10:
         status["meta_ready"] = True
 
-    # 3. 检查处理结果 (查看 color_summary.csv 或 palettes 文件夹)
+    # 3) Check processing result (color_summary.csv)
     color_csv = data_dir / "csv" / "color_summary.csv"
     if color_csv.exists() and color_csv.stat().st_size > 10:
         status["process_ready"] = True
 
-    # 4. 检查 GeoJSON
+    # 4) Check GeoJSON
     geojson_path = data_dir / "geojson" / "facade_colors.geojson"
     if geojson_path.exists() and geojson_path.stat().st_size > 10:
         status["geojson_ready"] = True
 
     return status
 
-
-# ---------- API 1：初始化项目 ----------
+# ---------- API 1: Initialize project ----------
 @app.post("/api/init-project")
 def init_project(body: InitProjectBody):
     project_dir = PROJECT_ROOT / body.project_name
@@ -126,8 +125,7 @@ def init_project(body: InitProjectBody):
         (data_dir / folder).mkdir(parents=True, exist_ok=True)
     return {"ok": True, "project_dir": str(project_dir)}
 
-
-# ---------- API 2：解析 BBOX code ----------
+# ---------- API 2: Parse BBOX code ----------
 @app.post("/api/set-bbox")
 def set_bbox(body: BBoxBody):
     project_dir = PROJECT_ROOT / body.project_name
@@ -138,88 +136,77 @@ def set_bbox(body: BBoxBody):
         json.dump(config, f, ensure_ascii=False, indent=2)
     return {"ok": True, "bbox": bbox}
 
-
-# ---------- API 3：获取照片元数据 & 下载 ----------
+# ---------- API 3: Fetch image metadata & download ----------
 @app.post("/api/fetch-images")
 async def api_fetch_images(body: ProjectBody):
     project_dir = PROJECT_ROOT / body.project_name
 
     def fetch_pipeline():
-        yield f"[INFO] 🚀 开始请求 Mapillary API 获取元数据...\n"
+        yield "[INFO] 🚀 Starting Mapillary API request to fetch metadata...\n"
         try:
-            fetch_images.run_fetch_images(project_dir) 
-            yield f"[SUCCESS] 元数据 API 请求完成。\n"
+            fetch_images.run_fetch_images(project_dir)
+            yield "[SUCCESS] Metadata API request completed.\n"
         except Exception as e:
-            yield f"[ERROR] API 请求失败: {e}\n"
+            yield f"[ERROR] API request failed: {e}\n"
             return
 
-        yield f"[INFO] 正在解析原始 JSON 数据...\n"
+        yield "[INFO] Parsing raw JSON data...\n"
         try:
             parse_json.run_parse_json(project_dir)
-            yield f"[SUCCESS] JSON 解析完成，准备下载图片。\n"
+            yield "[SUCCESS] JSON parsing completed. Preparing to download images.\n"
         except Exception as e:
-            yield f"[ERROR] JSON 解析失败: {e}\n"
+            yield f"[ERROR] JSON parsing failed: {e}\n"
             return
 
-        yield f"[INFO] 启动下载器...\n"
+        yield "[INFO] Starting downloader...\n"
         try:
-            # 这里的 run_download_images 已经是 generator
             for log in download_images.run_download_images(project_dir):
                 yield log
         except Exception as e:
-            yield f"[ERROR] 下载过程中断: {e}\n"
+            yield f"[ERROR] Download interrupted: {e}\n"
             return
 
-        yield f"[DONE] ✅ 所有步骤执行完毕。\n"
+        yield "[DONE] ✅ All steps completed.\n"
 
     return StreamingResponse(fetch_pipeline(), media_type="text/plain")
 
-
-# ---------- API 4：处理图片（语义分割 + 提取色彩） ----------
-# 修正说明：移除了 GeoJSON 生成逻辑，让它只专注于处理图片
-# --------------------------------------------------------
+# ---------- API 4: Process images (segmentation + color extraction) ----------
 @app.post("/api/process-images")
 async def api_process_images(body: ProjectBody):
     project_dir = PROJECT_ROOT / body.project_name
 
     def process_pipeline():
-        yield f"[INFO] 🚀 开始语义分割与色彩提取任务...\n"
-        
+        yield "[INFO] 🚀 Starting semantic segmentation and color extraction...\n"
         try:
-            # 这里的 run_segment_building 已经是 generator
+            # ✅ Lazy import: avoid loading torch/mmcv at server startup
+            from src.segmentation import segment_building
             for log in segment_building.run_segment_building(project_dir):
                 yield log
         except Exception as e:
-            yield f"[ERROR] 分割处理失败: {e}\n"
+            yield f"[ERROR] Segmentation processing failed: {e}\n"
             return
 
-        # ❗这里不再调用 build_geojson，保持逻辑纯粹
-        yield f"[SUCCESS] ✅ 图片处理完成。请点击下一步生成地图。\n"
+        yield "[SUCCESS] ✅ Image processing completed. Please proceed to generate the map.\n"
 
     return StreamingResponse(process_pipeline(), media_type="text/plain")
 
-
-# ---------- API 5：生成 GeoJSON ----------
-# 修正说明：这才是真正生成地图的地方
-# ------------------------------------
+# ---------- API 5: Build GeoJSON ----------
 @app.post("/api/build-geojson")
 async def api_build_geojson(body: ProjectBody):
     project_dir = PROJECT_ROOT / body.project_name
 
     def build_pipeline():
-        yield f"[INFO] 开始生成 GeoJSON 数据...\n"
+        yield "[INFO] Starting GeoJSON generation...\n"
         try:
-            # 调用 build_geojson 生成文件
             path = build_geojson.run_build_geojson(project_dir)
-            yield f"[SUCCESS] GeoJSON 生成成功: {path}\n"
-            yield f"[INFO] 地图数据已准备就绪。\n"
+            yield f"[SUCCESS] GeoJSON generated successfully: {path}\n"
+            yield "[INFO] Map data is ready.\n"
         except Exception as e:
-            yield f"[ERROR] 生成失败: {e}\n"
+            yield f"[ERROR] Generation failed: {e}\n"
 
     return StreamingResponse(build_pipeline(), media_type="text/plain")
 
-
-# ---------- API 6：给前端地图读取 GeoJSON ----------
+# ---------- API 6: Provide GeoJSON for frontend map ----------
 @app.get("/api/geojson/{project_name}")
 def get_geojson(project_name: str):
     geojson_file = PROJECT_ROOT / project_name / "data/geojson/facade_colors.geojson"

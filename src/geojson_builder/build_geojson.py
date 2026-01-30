@@ -1,29 +1,30 @@
 """
 build_geojson.py
 
-功能：
-    读取 images_meta.csv（id + 经纬度 + thumb_url）
-    读取 color_summary.csv（每张图的主色列表 + 占比）
-    通过 image_id 进行关联，生成给前端用的 GeoJSON 点图层。
+Purpose:
+    - Read images_meta.csv (id + longitude + latitude + thumb_url)
+    - Read color_summary.csv (dominant color palette + ratios per image)
+    - Join the two datasets by image_id
+    - Generate a GeoJSON point layer for frontend visualization
 
-两种使用方式：
+Two usage modes:
 
-A) 命令行模式（原来那种）：
-    输入：
+A) Command-line mode (original mode):
+    Input:
         PROJECT_ROOT/data/csv/images_meta.csv
         PROJECT_ROOT/data/csv/color_summary.csv
-    输出：
+    Output:
         PROJECT_ROOT/web/public/data/city_colors.geojson
-    运行：
+    Run:
         python src/geojson_builder/build_geojson.py
 
-B) FastAPI 多项目模式：
-    输入：
+B) FastAPI multi-project mode:
+    Input:
         projects/{project_name}/data/csv/images_meta.csv
         projects/{project_name}/data/csv/color_summary.csv
-    输出：
+    Output:
         projects/{project_name}/data/geojson/facade_colors.geojson
-    调用：
+    Call:
         build_geojson.run_build_geojson(project_dir)
 """
 
@@ -32,34 +33,36 @@ import csv
 import json
 import ast
 
-# 仓库根目录：.../city-color-map/
+# Repository root directory: .../city-color-map/
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# ====== 模式 A：命令行模式默认路径（全局） ======
+# ====== Mode A: default paths for command-line usage (global) ======
 DEFAULT_META_CSV = PROJECT_ROOT / "data" / "csv" / "images_meta.csv"
 DEFAULT_COLOR_CSV = PROJECT_ROOT / "data" / "csv" / "color_summary.csv"
 DEFAULT_OUT_GEOJSON = PROJECT_ROOT / "web" / "public" / "data" / "city_colors.geojson"
-# =================================================
+# ==================================================================
 
 
 def load_metadata(path: Path):
     """
-    读取 images_meta / image_metadata CSV
-    返回 dict: image_id -> dict(lon=..., lat=..., thumb_url=...)
+    Read images_meta / image_metadata CSV.
 
-    兼容两种字段名：
+    Returns:
+        dict: image_id -> dict(lon=..., lat=..., thumb_url=...)
+
+    Supports two possible field name conventions:
         - id / image_id
         - thumb_2048_url / thumb_url
     """
     path = Path(path)
     if not path.exists():
-        raise SystemExit(f"[ERROR] 找不到元数据 CSV：{path}")
+        raise SystemExit(f"[ERROR] Metadata CSV not found: {path}")
 
     meta = {}
     with path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # 兼容字段名
+            # Handle alternative field names
             image_id = row.get("image_id") or row.get("id")
             thumb_url = row.get("thumb_url") or row.get("thumb_2048_url")
             lon = row.get("lon")
@@ -79,20 +82,23 @@ def load_metadata(path: Path):
                 "thumb_url": thumb_url,
             }
 
-    print(f"[INFO] 从 {path.name} 读取到 {len(meta)} 条元数据记录")
+    print(f"[INFO] Loaded {len(meta)} metadata records from {path.name}")
     return meta
 
 
 def load_colors(path: Path):
     """
-    读取 color_summary.csv
-    返回 dict: image_id -> dict(palette_rgb=[ [r,g,b], ... ], ratios=[...])
+    Read color_summary.csv.
 
-    其中 image_id 由 file 字段去掉 '_building_shadowfree' 得到。
+    Returns:
+        dict: image_id -> dict(palette_rgb=[[r,g,b], ...], ratios=[...])
+
+    The image_id is derived from the 'file' field by removing
+    '_building_shadowfree'.
     """
     path = Path(path)
     if not path.exists():
-        raise SystemExit(f"[ERROR] 找不到颜色 CSV：{path}")
+        raise SystemExit(f"[ERROR] Color CSV not found: {path}")
 
     color_map = {}
     with path.open("r", encoding="utf-8") as f:
@@ -102,7 +108,7 @@ def load_colors(path: Path):
             if not fname:
                 continue
 
-            # file 形如 "123456_building_shadowfree.png"
+            # file example: "123456_building_shadowfree.png"
             if "_building_shadowfree" in fname:
                 image_id = fname.split("_building_shadowfree", 1)[0]
             else:
@@ -111,7 +117,7 @@ def load_colors(path: Path):
             raw_palette = row.get("palette_rgb", "")
             raw_ratios = row.get("ratios", "")
 
-            # CSV 里是 Python 风格字符串，需要解析成对象
+            # Values are stored as Python-style strings in CSV
             try:
                 palette = ast.literal_eval(raw_palette)
                 ratios = ast.literal_eval(raw_ratios)
@@ -128,23 +134,23 @@ def load_colors(path: Path):
                 "ratios": ratios,
             }
 
-    print(f"[INFO] 从 {path.name} 读取到 {len(color_map)} 条颜色记录")
+    print(f"[INFO] Loaded {len(color_map)} color records from {path.name}")
     return color_map
 
 
 def rgb_to_hex(rgb):
-    """[R,G,B] -> '#rrggbb'"""
+    """Convert [R, G, B] to '#rrggbb'."""
     r, g, b = [int(max(0, min(255, x))) for x in rgb]
     return "#{:02x}{:02x}{:02x}".format(r, g, b)
 
 
 def build_features(meta_map, color_map):
     """
-    合并两份数据，构建 GeoJSON Feature 列表
+    Merge metadata and color data to build a list of GeoJSON Features.
     """
     features = []
     common_ids = set(meta_map.keys()) & set(color_map.keys())
-    print(f"[INFO] 可成功关联的 image_id 数量：{len(common_ids)}")
+    print(f"[INFO] Number of matched image_id entries: {len(common_ids)}")
 
     for image_id in common_ids:
         m = meta_map[image_id]
@@ -157,14 +163,14 @@ def build_features(meta_map, color_map):
         palette = c["palette_rgb"]
         ratios = c["ratios"]
 
-        # 主色取第一个
+        # Use the first color as the dominant color
         main_rgb = palette[0]
         main_ratio = float(ratios[0]) if ratios else None
         main_hex = rgb_to_hex(main_rgb)
 
-        # 对应的色卡文件名（在 data/palettes 下）
+        # Corresponding palette image filename (under data/palettes)
         palette_image_name = f"{image_id}_palette.png"
-        # 前端可以按这个相对路径访问（你前端怎么部署可以再调整）
+        # Relative path for frontend access (can be adjusted depending on deployment)
         palette_image_path = f"/data/palettes/{palette_image_name}"
 
         feature = {
@@ -195,17 +201,17 @@ def build_geojson_from_paths(meta_csv: Path,
                              color_csv: Path,
                              out_geojson: Path) -> Path:
     """
-    通用构建函数：
-    - 读 meta_csv + color_csv
-    - 写 out_geojson
-    - 返回 out_geojson 路径
+    Generic builder function:
+        - Read meta_csv and color_csv
+        - Write GeoJSON to out_geojson
+        - Return the output path
     """
     meta_map = load_metadata(meta_csv)
     color_map = load_colors(color_csv)
     features = build_features(meta_map, color_map)
 
     if not features:
-        print("[WARN] 没有生成任何 Feature，请检查 image_id 是否能在两份 CSV 中匹配。")
+        print("[WARN] No Features generated. Check whether image_id values match in both CSV files.")
 
     out_geojson = Path(out_geojson)
     out_dir = out_geojson.parent
@@ -219,20 +225,20 @@ def build_geojson_from_paths(meta_csv: Path,
     with out_geojson.open("w", encoding="utf-8") as f:
         json.dump(fc, f, ensure_ascii=False, indent=2)
 
-    print(f"[DONE] 已生成 GeoJSON：{out_geojson}，共 {len(features)} 个点要素")
+    print(f"[DONE] GeoJSON generated: {out_geojson}, total features: {len(features)}")
     return out_geojson
 
 
-# ====== 给 FastAPI 用的入口（多项目） ======
+# ====== FastAPI entry point (multi-project mode) ======
 def run_build_geojson(project_dir) -> Path:
     """
-    FastAPI 模式：
+    FastAPI mode:
         project_dir = projects/{project_name}
 
-    输入：
+    Input:
         project_dir/data/csv/images_meta.csv
         project_dir/data/csv/color_summary.csv
-    输出：
+    Output:
         project_dir/data/geojson/facade_colors.geojson
     """
     project_dir = Path(project_dir)

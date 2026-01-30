@@ -1,0 +1,36 @@
+# git / ide
+.git/
+.vscode/
+.idea/
+
+# python caches / venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+
+# local data (do not bake into image)
+data/
+projects/
+projects-baocun/
+weights/
+datasets/
+outputs/
+runs/
+logs/
+
+# node build artifacts
+web/node_modules/
+web/dist/
+
+# large weights/checkpoints
+*.pth
+*.ckpt
+*.onnx
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

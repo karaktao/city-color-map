@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
+requests
+pandas
+numpy<2
+opencv-python-headless
+Pillow
+tqdm
+shapely
+geopandas
+mmsegmentation==1.2.2
+ftfy
+regex

@@ -1,14 +1,15 @@
 """
 segment_building.py (Streaming Log Version)
 
-功能：
-1. 使用 SegFormer 模型对街景图做语义分割
-2. 在建筑区域内做阴影检测
-3. 对建筑像素做主色提取
-4. 输出颜色统计 CSV
+Purpose:
+1. Run semantic segmentation on street-view images using a SegFormer model
+2. Detect shadows inside building regions
+3. Extract dominant colors from building pixels
+4. Export color statistics CSV
 
-修改说明：
-已移除 tqdm，改为 yield 生成器模式，适配前端实时进度显示。
+Notes:
+- tqdm has been removed
+- Uses generator (yield) logs for real-time progress display in the frontend
 """
 
 import sys
@@ -18,26 +19,26 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-# from tqdm import tqdm  <-- 移除 tqdm
+# from tqdm import tqdm  <-- tqdm removed
 from sklearn.cluster import KMeans
 
 from mmseg.apis import init_model, inference_model
 from mmseg.utils import register_all_modules
 import torch
 
-# ================== 路径配置 ==================
+# ================== Path configuration ==================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CFG_PATH = PROJECT_ROOT / "segformer_mit-b0_8xb2-160k_ade20k-512x512.py"
 CKPT_GLOB = str(PROJECT_ROOT / "segformer_mit-b0_*ade20k*.pth")
 
-# 默认路径
+# Default paths
 DEFAULT_IN_DIR = PROJECT_ROOT / "data" / "images"
 DEFAULT_OUT_MASK_DIR = PROJECT_ROOT / "data" / "masks"
 DEFAULT_OUT_ONLY_DIR = PROJECT_ROOT / "data" / "building_rgba"
 DEFAULT_OUT_PALETTE_DIR = PROJECT_ROOT / "data" / "palettes"
 DEFAULT_CSV_OUT = PROJECT_ROOT / "data" / "csv" / "color_summary.csv"
 
-# ================== 参数配置 ==================
+# ================== Parameter configuration ==================
 KL = 1.0
 KB = 0.5
 MORPH_KERNEL = 3
@@ -49,7 +50,7 @@ MIN_SAMPLES = 500
 
 
 def find_ckpt():
-    """查找权重文件，如果没找到返回 None，由调用者处理报错"""
+    """Find the checkpoint file. Return None if not found (caller handles the error)."""
     cands = sorted(glob.glob(CKPT_GLOB))
     if not cands:
         return None
@@ -97,8 +98,10 @@ def save_building_only_shadowfree(img_bgr, mask255, out_path: Path):
 
 def load_rgba(path: Path):
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-    if img is None: return None, None
-    if img.ndim == 2: img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
+    if img is None:
+        return None, None
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGRA)
     if img.shape[2] == 3:
         a = np.full(img.shape[:2], 255, np.uint8)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
@@ -108,12 +111,14 @@ def load_rgba(path: Path):
 
 def get_dominant_colors(bgr, alpha, k=TOPK):
     mask = alpha > 0
-    if mask.sum() < MIN_SAMPLES: return []
+    if mask.sum() < MIN_SAMPLES:
+        return []
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     sel = rgb[mask].astype(np.uint8)
     keep = ~((sel >= WHITE_TH).all(axis=1) | (sel <= BLACK_TH).all(axis=1))
     sel = sel[keep]
-    if sel.shape[0] < MIN_SAMPLES: return []
+    if sel.shape[0] < MIN_SAMPLES:
+        return []
     uniq = np.unique(sel, axis=0)
     n_clusters = int(min(k, max(1, len(uniq))))
     km = KMeans(n_clusters=n_clusters, n_init=10, random_state=42)
@@ -143,7 +148,8 @@ def compose_with_palette_keep_alpha(bgra, colors, palette_w=PALETTE_W):
 
 def _segment_pipeline(in_dir: Path, out_mask_dir: Path, out_only_dir: Path, out_palette_dir: Path, csv_out: Path):
     """
-    核心 Generator：包含三个大步骤，每处理一张图都会 yield 日志。
+    Core generator pipeline:
+    Includes three major steps and yields logs for each processed image.
     """
     in_dir = Path(in_dir)
     out_mask_dir = Path(out_mask_dir)
@@ -152,53 +158,53 @@ def _segment_pipeline(in_dir: Path, out_mask_dir: Path, out_only_dir: Path, out_
     csv_out = Path(csv_out)
 
     if not in_dir.exists():
-        yield f"[ERROR] 输入目录不存在：{in_dir}\n"
+        yield f"[ERROR] Input directory does not exist: {in_dir}\n"
         return
 
-    # 获取所有图片
+    # Collect image files
     imgs = [p for p in in_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}]
     total_imgs = len(imgs)
-    
+
     if not imgs:
-        yield f"[WARN] {in_dir} 里没有找到任何图片文件。\n"
+        yield f"[WARN] No image files found in {in_dir}.\n"
         return
 
     ensure_dirs(out_mask_dir, out_only_dir, out_palette_dir, csv_out.parent)
-    yield f"[INFO] 共发现 {total_imgs} 张图片，开始处理流程...\n"
+    yield f"[INFO] Found {total_imgs} images. Starting pipeline...\n"
 
-    # ================= Step 1: 语义分割 =================
-    need_infer = any(not (out_mask_dir / f"{p.stem}_building.png").exists() for p in imgs)
-    
+    # ================= Step 1: Semantic segmentation =================
+    need_infer = any(not (out_mask_dir / f\"{p.stem}_building.png\").exists() for p in imgs)
+
     if need_infer:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        yield f"[INFO] 加载 SegFormer 模型 (Device: {device})...\n"
-        
+        yield f"[INFO] Loading SegFormer model (Device: {device})...\n"
+
         try:
             register_all_modules(init_default_scope=False)
             ckpt = find_ckpt()
             if ckpt is None:
-                yield f"[ERROR] 未找到权重文件: {CKPT_GLOB}\n"
+                yield f"[ERROR] Checkpoint not found: {CKPT_GLOB}\n"
                 return
 
             model = init_model(str(CFG_PATH), ckpt, device=device)
             classes = model.dataset_meta.get("classes")
             building_ids = pick_building_ids(classes) if classes else [1]
-            
-            yield f"[INFO] 模型加载完毕，开始 [Step 1/3] 语义分割...\n"
-            
-            # --- 循环处理 Step 1 ---
+
+            yield "[INFO] Model loaded. Starting [Step 1/3] semantic segmentation...\n"
+
+            # --- Step 1 loop ---
             for i, p in enumerate(imgs):
                 out_path = out_mask_dir / f"{p.stem}_building.png"
-                
-                # 汇报进度：例如 [Step 1/3] (1/33) 分割: 12345.jpg ...
-                # 如果图片很多，可以 if i % 5 == 0 才 yield，这里设置为每一张都 yield
-                yield f"[INFO] [Step 1/3] ({i+1}/{total_imgs}) 分割: {p.name} ...\n"
+
+                # Progress log, e.g. [Step 1/3] (1/33) Segmenting: 12345.jpg ...
+                yield f"[INFO] [Step 1/3] ({i+1}/{total_imgs}) Segmenting: {p.name} ...\n"
 
                 if out_path.exists():
                     continue
 
                 img_bgr = cv2.imread(str(p))
-                if img_bgr is None: continue
+                if img_bgr is None:
+                    continue
 
                 img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
                 result = inference_model(model, img_rgb)
@@ -206,80 +212,79 @@ def _segment_pipeline(in_dir: Path, out_mask_dir: Path, out_only_dir: Path, out_
                 mask255 = (np.isin(seg, building_ids)).astype(np.uint8) * 255
                 cv2.imwrite(str(out_path), mask255)
 
-            yield f"[SUCCESS] ✅ Step 1 语义分割完成。\n"
-            
+            yield "[SUCCESS] ✅ Step 1 completed: semantic segmentation done.\n"
+
         except Exception as e:
-            yield f"[ERROR] 分割推理出错: {e}\n"
+            yield f"[ERROR] Segmentation inference failed: {e}\n"
             return
     else:
-        yield f"[INFO] 检测到已有建筑通道图，跳过 [Step 1]。\n"
+        yield "[INFO] Existing building masks detected. Skipping [Step 1].\n"
 
-
-    # ================= Step 2: 阴影去除 =================
-    yield f"[INFO] 开始 [Step 2/3] 阴影去除与透明化...\n"
+    # ================= Step 2: Shadow removal =================
+    yield "[INFO] Starting [Step 2/3] shadow removal and alpha masking...\n"
     count = 0
     for i, p in enumerate(imgs):
         out_path = out_only_dir / f"{p.stem}_building_shadowfree.png"
-        
-        # 汇报进度
-        yield f"[INFO] [Step 2/3] ({i+1}/{total_imgs}) 去阴影: {p.name} ...\n"
+
+        yield f"[INFO] [Step 2/3] ({i+1}/{total_imgs}) Removing shadow: {p.name} ...\n"
 
         if out_path.exists():
             count += 1
             continue
-        
+
         mask_path = out_mask_dir / f"{p.stem}_building.png"
-        if not mask_path.exists(): continue
-        
+        if not mask_path.exists():
+            continue
+
         mask255 = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         img_bgr = cv2.imread(str(p))
-        if mask255 is None or img_bgr is None: continue
-        
+        if mask255 is None or img_bgr is None:
+            continue
+
         save_building_only_shadowfree(img_bgr, mask255, out_path)
         count += 1
 
-    yield f"[SUCCESS] ✅ Step 2 完成，生成 {count} 张透明图。\n"
+    yield f"[SUCCESS] ✅ Step 2 completed. Generated {count} transparent PNGs.\n"
 
-
-    # ================= Step 3: 色彩提取 =================
+    # ================= Step 3: Color extraction =================
     files = sorted(out_only_dir.glob("*.png"))
     total_files = len(files)
-    
+
     if not files:
-        yield f"[WARN] 未找到透明图，跳过 Step 3。\n"
+        yield "[WARN] No transparent PNGs found. Skipping Step 3.\n"
         return
 
-    yield f"[INFO] 开始 [Step 3/3] 提取主色并生成色卡...\n"
-    
+    yield "[INFO] Starting [Step 3/3] dominant color extraction and palette generation...\n"
+
     with csv_out.open("w", newline="", encoding="utf-8") as fcsv:
         writer = csv.writer(fcsv)
         writer.writerow(["file", "palette_rgb", "ratios"])
-        
+
         for i, fp in enumerate(files):
-            # 汇报进度
-            yield f"[INFO] [Step 3/3] ({i+1}/{total_files}) 提色: {fp.name} ...\n"
-            
+            yield f"[INFO] [Step 3/3] ({i+1}/{total_files}) Extracting colors: {fp.name} ...\n"
+
             bgr, alpha = load_rgba(fp)
-            if bgr is None: continue
-            
+            if bgr is None:
+                continue
+
             colors = get_dominant_colors(bgr, alpha, k=TOPK)
             bgra = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
             bgra[alpha == 0, 3] = 0
             out_img = compose_with_palette_keep_alpha(bgra, colors, PALETTE_W)
-            
+
             out_name = f"{fp.stem.replace('_building_shadowfree', '')}_palette.png"
             cv2.imwrite(str(out_palette_dir / out_name), out_img)
-            
+
             writer.writerow([fp.name, [c for c, _ in colors], [r for _, r in colors]])
 
-    yield f"[SUCCESS] ✅ Step 3 完成。CSV 已保存。\n"
+    yield "[SUCCESS] ✅ Step 3 completed. CSV saved.\n"
 
 
 # =========================================================
 
 def run_segment_building(project_dir):
     """
-    FastAPI 调用的入口 (Generator)
+    FastAPI entry point (Generator).
     """
     project_dir = Path(project_dir)
     in_dir = project_dir / "data" / "images"
@@ -287,17 +292,17 @@ def run_segment_building(project_dir):
     out_only_dir = project_dir / "data" / "building_rgba"
     out_palette_dir = project_dir / "data" / "palettes"
     csv_out = project_dir / "data" / "csv" / "color_summary.csv"
-    
-    # 只需要返回 _segment_pipeline 的 iterator
+
+    # Return the iterator from _segment_pipeline
     return _segment_pipeline(in_dir, out_mask_dir, out_only_dir, out_palette_dir, csv_out)
 
 
 def main():
     """
-    脚本 CLI 模式
+    Script CLI mode.
     """
-    print("正在运行 segment_building CLI 模式...")
-    # 模拟 API 调用的消费方式
+    print("Running segment_building in CLI mode...")
+    # Simulate how the API would consume the generator
     gen = _segment_pipeline(
         DEFAULT_IN_DIR,
         DEFAULT_OUT_MASK_DIR,
@@ -306,7 +311,7 @@ def main():
         DEFAULT_CSV_OUT,
     )
     for log in gen:
-        # 在本地终端直接打印，不换行是为了模拟 log stream
+        # Print directly in terminal; keep end="" to simulate log streaming
         print(log, end="")
 
 

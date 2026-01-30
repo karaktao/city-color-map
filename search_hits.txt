@@ -1,0 +1,1115 @@
+src\api_fetch\fetch_images.py:3:从 Mapillary Graph API 批量获取街景图片元数据，并把每一页的 JSON
+src\api_fetch\fetch_images.py:22:# 如果完全没有 bbox 配置时的“兜底默认值”
+src\api_fetch\fetch_images.py:24:DEFAULT_BBOX = "6.865833,52.205278,6.917778,52.233889"
+src\api_fetch\fetch_images.py:27:LIMIT = 3000  # 为了保持输出文件名一致，这里不改；但更稳的建议是 500~2000
+src\api_fetch\fetch_images.py:28:BASE_URL = "https://graph.mapillary.com/images"
+src\api_fetch\fetch_images.py:62:def parse_bbox_code(code: str) -> str:
+src\api_fetch\fetch_images.py:71:       从所有点里取 min/max 组成 bbox
+src\api_fetch\fetch_images.py:73:    返回十进制 bbox 字符串: "west,south,east,north"
+src\api_fetch\fetch_images.py:76:        raise ValueError("空的 BBOX_CODE")
+src\api_fetch\fetch_images.py:107:    raise ValueError("BBOX_CODE 格式不完整或不支持的格式")
+src\api_fetch\fetch_images.py:110:def _resolve_bbox_from_project(project_dir: Path) -> str:
+src\api_fetch\fetch_images.py:112:    从项目目录读取 config.json 中的 bbox / bbox_code，
+src\api_fetch\fetch_images.py:113:    如果没有或解析失败，则回退到 DEFAULT_BBOX。
+src\api_fetch\fetch_images.py:118:    bbox = DEFAULT_BBOX
+src\api_fetch\fetch_images.py:125:            print(f"[WARN] 无法读取 {config_path}，使用默认 bbox. 错误: {e}")
+src\api_fetch\fetch_images.py:126:            return bbox
+src\api_fetch\fetch_images.py:128:        cfg_bbox = (config.get("bbox") or "").strip()
+src\api_fetch\fetch_images.py:129:        cfg_code = (config.get("bbox_code") or "").strip()
+src\api_fetch\fetch_images.py:131:        if cfg_bbox:
+src\api_fetch\fetch_images.py:132:            print(f"[INFO] 从 {config_path} 读取十进制 bbox = {cfg_bbox}")
+src\api_fetch\fetch_images.py:133:            return cfg_bbox
+src\api_fetch\fetch_images.py:136:            print(f"[INFO] 从 {config_path} 读取 bbox_code，尝试解析...")
+src\api_fetch\fetch_images.py:138:                parsed = parse_bbox_code(cfg_code)
+src\api_fetch\fetch_images.py:139:                print(f"[INFO] bbox_code 解析成功: {parsed}")
+src\api_fetch\fetch_images.py:142:                print(f"[WARN] bbox_code 解析失败，将使用默认 bbox. 错误: {e}")
+src\api_fetch\fetch_images.py:144:        print(f"[INFO] config.json 中没有有效 bbox，使用默认 DEFAULT_BBOX = {bbox}")
+src\api_fetch\fetch_images.py:145:        return bbox
+src\api_fetch\fetch_images.py:147:    print(f"[INFO] 未找到 {config_path}，使用默认 DEFAULT_BBOX = {bbox}")
+src\api_fetch\fetch_images.py:148:    return bbox
+src\api_fetch\fetch_images.py:153:def _parse_bbox_str(bbox: str):
+src\api_fetch\fetch_images.py:154:    w, s, e, n = [float(x.strip()) for x in bbox.split(",")]
+src\api_fetch\fetch_images.py:156:        raise ValueError(f"bbox 不合法：{bbox}")
+src\api_fetch\fetch_images.py:160:def _format_bbox(w: float, s: float, e: float, n: float) -> str:
+src\api_fetch\fetch_images.py:164:def _tile_bboxes(big_bbox: str, tile_size: float, overlap_ratio: float):
+src\api_fetch\fetch_images.py:166:    大 bbox -> 多个小 bbox（tile），带少量重叠避免边界漏图。
+src\api_fetch\fetch_images.py:168:    w, s, e, n = _parse_bbox_str(big_bbox)
+src\api_fetch\fetch_images.py:180:            tiles.append(_format_bbox(x, y, x2, y2))
+src\api_fetch\fetch_images.py:199:                retry_after = resp.headers.get("Retry-After")
+src\api_fetch\fetch_images.py:200:                sleep_s = float(retry_after) if retry_after else (BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+src\api_fetch\fetch_images.py:220:def _fetch_images_core(raw_dir: Path, bbox: str):
+src\api_fetch\fetch_images.py:222:    实际抓取 Mapillary 数据的核心函数（升级：tile 模式，但输入输出保持一致）。
+src\api_fetch\fetch_images.py:224:    bbox:   "west,south,east,north"
+src\api_fetch\fetch_images.py:228:    - 文件名仍然是：images_bbox_{big_bbox_safe}_limit{LIMIT}_page{page}.json
+src\api_fetch\fetch_images.py:232:    big_bbox = bbox
+src\api_fetch\fetch_images.py:233:    big_bbox_safe = big_bbox.replace(",", "_")
+src\api_fetch\fetch_images.py:236:    tiles = _tile_bboxes(big_bbox, tile_size=TILE_SIZE_DEG, overlap_ratio=TILE_OVERLAP_RATIO)
+src\api_fetch\fetch_images.py:237:    print(f"[INFO] 开始抓取 Mapillary 数据（tile 模式），big_bbox={big_bbox}")
+src\api_fetch\fetch_images.py:244:    for t_idx, tile_bbox in enumerate(tiles, start=1):
+src\api_fetch\fetch_images.py:245:        after_cursor = None
+src\api_fetch\fetch_images.py:249:            "bbox": tile_bbox,
+src\api_fetch\fetch_images.py:251:            "limit": LIMIT,
+src\api_fetch\fetch_images.py:254:        print(f"[INFO] TILE {t_idx}/{len(tiles)} bbox={tile_bbox}")
+src\api_fetch\fetch_images.py:257:            if after_cursor:
+src\api_fetch\fetch_images.py:258:                params["after"] = after_cursor
+src\api_fetch\fetch_images.py:259:            elif "after" in params:
+src\api_fetch\fetch_images.py:260:                params.pop("after")
+src\api_fetch\fetch_images.py:277:            # ✅ 输出文件名：保持原来的风格（使用 big_bbox，而不是 tile_bbox）
+src\api_fetch\fetch_images.py:279:            out_path = raw_dir / f"images_bbox_{big_bbox_safe}_limit{LIMIT}_page{current_page}.json"
+src\api_fetch\fetch_images.py:288:            paging = data.get("paging", {})
+src\api_fetch\fetch_images.py:289:            after_cursor = paging.get("cursors", {}).get("after")
+src\api_fetch\fetch_images.py:290:            if not after_cursor:
+src\api_fetch\fetch_images.py:305:    - 从 config.json 读取 bbox/bbox_code
+src\api_fetch\fetch_images.py:312:    bbox = _resolve_bbox_from_project(project_dir)
+src\api_fetch\fetch_images.py:313:    _fetch_images_core(raw_dir, bbox)
+src\api_fetch\fetch_images.py:321:    - 使用 DEFAULT_BBOX
+src\api_fetch\fetch_images.py:323:    print("[INFO] 以脚本方式运行 fetch_images.py，使用全局 RAW_DIR 和 DEFAULT_BBOX")
+src\api_fetch\fetch_images.py:324:    _fetch_images_core(GLOBAL_RAW_DIR, DEFAULT_BBOX)
+src\api_main.py:46:class BBoxBody(BaseModel):
+src\api_main.py:48:    bbox_code: str
+src\api_main.py:81:        "bbox": None,
+src\api_main.py:82:        "bbox_code": None,
+src\api_main.py:91:    # 1. 检查 BBOX (config.json)
+src\api_main.py:97:                status["bbox"] = cfg.get("bbox")
+src\api_main.py:98:                status["bbox_code"] = cfg.get("bbox_code")
+src\api_main.py:130:# ---------- API 2：解析 BBOX code ----------
+src\api_main.py:131:@app.post("/api/set-bbox")
+src\api_main.py:132:def set_bbox(body: BBoxBody):
+src\api_main.py:135:    bbox = fetch_images.parse_bbox_code(body.bbox_code)
+src\api_main.py:136:    config = {"bbox_code": body.bbox_code, "bbox": bbox}
+src\api_main.py:139:    return {"ok": True, "bbox": bbox}
+src\api_main.py:148:        yield f"[INFO] 🚀 开始请求 Mapillary API 获取元数据...\n"
+src\preprocess\parse_json.py:25:        # Mapillary 一般是 [lon, lat]
+venv\Lib\site-packages\adodbapi\adodbapi.py:69:        c = Dispatch("ADODB.Connection")  # connect _after_ CoIninialize v2.1.1 adamvan
+venv\Lib\site-packages\adodbapi\adodbapi.py:112:#  Set defaultCursorLocation on module level before creating the connection.
+venv\Lib\site-packages\adodbapi\adodbapi.py:114:defaultCursorLocation = adc.adUseClient  # changed from adUseServer as of v 2.3.0
+venv\Lib\site-packages\adodbapi\adodbapi.py:168:                L = min(L, p.Size)  # v2.1 Cole limit data to defined size
+venv\Lib\site-packages\adodbapi\adodbapi.py:171:            p.Value = value  # don't limit if db column is numeric
+venv\Lib\site-packages\adodbapi\adodbapi.py:237:        self.cursors = weakref.WeakValueDictionary()
+venv\Lib\site-packages\adodbapi\adodbapi.py:285:        self.connector.CursorLocation = defaultCursorLocation  # v2.1 Rose
+venv\Lib\site-packages\adodbapi\adodbapi.py:327:        The same applies to all cursor objects trying to use the connection.
+venv\Lib\site-packages\adodbapi\adodbapi.py:329:        for crsr in list(self.cursors.values())[
+venv\Lib\site-packages\adodbapi\adodbapi.py:442:    def cursor(self):
+venv\Lib\site-packages\adodbapi\adodbapi.py:443:        "Return a new Cursor Object using the connection."
+venv\Lib\site-packages\adodbapi\adodbapi.py:445:        c = Cursor(self)
+venv\Lib\site-packages\adodbapi\adodbapi.py:449:        "message from a new cursor proclaiming its existence"
+venv\Lib\site-packages\adodbapi\adodbapi.py:451:        self.cursors[oid] = crsr
+venv\Lib\site-packages\adodbapi\adodbapi.py:454:        "message from a cursor giving connection a chance to clean up"
+venv\Lib\site-packages\adodbapi\adodbapi.py:456:            del self.cursors[id(crsr)]
+venv\Lib\site-packages\adodbapi\adodbapi.py:519:# # # # # ----- the Class that defines a cursor ----- # # # # #
+venv\Lib\site-packages\adodbapi\adodbapi.py:520:class Cursor:
+venv\Lib\site-packages\adodbapi\adodbapi.py:527:    ##    cursor has not had an operation invoked via the executeXXX() method yet.
+venv\Lib\site-packages\adodbapi\adodbapi.py:532:    ##    The attribute is -1 in case no executeXXX() has been performed on the cursor or
+venv\Lib\site-packages\adodbapi\adodbapi.py:554:        self.rs = None  # the ADO recordset for this cursor
+venv\Lib\site-packages\adodbapi\adodbapi.py:565:                "%s New cursor at %X on conn %X"
+venv\Lib\site-packages\adodbapi\adodbapi.py:584:        "Allow database cursors to be used with context managers."
+venv\Lib\site-packages\adodbapi\adodbapi.py:588:        "Allow database cursors to be used with context managers."
+venv\Lib\site-packages\adodbapi\adodbapi.py:591:    def _raiseCursorError(self, errorclass, errorvalue):
+venv\Lib\site-packages\adodbapi\adodbapi.py:621:                self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:687:        """Close the cursor now (rather than whenever __del__ is called).
+venv\Lib\site-packages\adodbapi\adodbapi.py:688:        The cursor will be unusable from this point forward; an Error (or subclass)
+venv\Lib\site-packages\adodbapi\adodbapi.py:689:        exception will be raised if any operation is attempted with the cursor.
+venv\Lib\site-packages\adodbapi\adodbapi.py:702:            )  # take me off the connection's cursors list
+venv\Lib\site-packages\adodbapi\adodbapi.py:707:            print("adodbapi Closed cursor at %X" % id(self))
+venv\Lib\site-packages\adodbapi\adodbapi.py:720:            self._raiseCursorError(api.InterfaceError, None)
+venv\Lib\site-packages\adodbapi\adodbapi.py:730:            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:755:            self._raiseCursorError(klass, _message)
+venv\Lib\site-packages\adodbapi\adodbapi.py:765:        # Therefore, COM will not return rowcount for server-side cursors. [Cole]
+venv\Lib\site-packages\adodbapi\adodbapi.py:766:        # Client-side cursors (the default since v2.8) will force a static
+venv\Lib\site-packages\adodbapi\adodbapi.py:767:        # cursor, and rowcount will then be set accurately [Cole]
+venv\Lib\site-packages\adodbapi\adodbapi.py:774:        after the last recordset has been read.  In that case, you must coll nextset() until it
+venv\Lib\site-packages\adodbapi\adodbapi.py:816:        cursor if the sproc defines an integer return value.
+venv\Lib\site-packages\adodbapi\adodbapi.py:885:                            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:905:                            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:931:                            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:959:                            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:974:        A reference to the operation will be retained by the cursor.
+venv\Lib\site-packages\adodbapi\adodbapi.py:975:        If the same operation object is passed in again, then the cursor
+venv\Lib\site-packages\adodbapi\adodbapi.py:1034:    def _fetch(self, limit=None):
+venv\Lib\site-packages\adodbapi\adodbapi.py:1037:        limit -- Number of rows to fetch, or None (default) to fetch all rows.
+venv\Lib\site-packages\adodbapi\adodbapi.py:1040:            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:1047:        if limit:  # limit number of rows retrieved
+venv\Lib\site-packages\adodbapi\adodbapi.py:1048:            ado_results = self.rs.GetRows(limit)
+venv\Lib\site-packages\adodbapi\adodbapi.py:1081:        If it is not given, the cursor's arraysize determines the number of rows to be fetched.
+venv\Lib\site-packages\adodbapi\adodbapi.py:1102:        Note that the cursor's arraysize attribute
+venv\Lib\site-packages\adodbapi\adodbapi.py:1121:            self._raiseCursorError(
+venv\Lib\site-packages\adodbapi\adodbapi.py:1130:            self._raiseCursorError(api.NotSupportedError, exc.args)  # [end 2.1 ekelund]
+venv\Lib\site-packages\adodbapi\ado_consts.py:8:adXactCursorStability = 0x1000
+venv\Lib\site-packages\adodbapi\ado_consts.py:15:# CursorLocationEnum
+venv\Lib\site-packages\adodbapi\ado_consts.py:19:# CursorTypeEnum
+venv\Lib\site-packages\adodbapi\apibase.py:25:def standardErrorHandler(connection, cursor, errorclass, errorvalue):
+venv\Lib\site-packages\adodbapi\apibase.py:31:    if cursor is not None:
+venv\Lib\site-packages\adodbapi\apibase.py:33:            cursor.messages.append(err)
+venv\Lib\site-packages\adodbapi\apibase.py:103:# hold special values. When passed to the cursor methods, the module can then detect the proper type of
+venv\Lib\site-packages\adodbapi\apibase.py:106:# A Cursor Object's description attribute returns information about each of the result columns of a query.
+venv\Lib\site-packages\adodbapi\apibase.py:113:# Note: Usage of Unix ticks for database interfacing can cause troubles because of the limited date range they cover.
+venv\Lib\site-packages\adodbapi\apibase.py:493:# to build the list of column conversion functions for the Cursor
+venv\Lib\site-packages\adodbapi\apibase.py:508:# # # # # classes to emulate the result of cursor.fetchxxx() as a sequence of sequences # # # # #
+venv\Lib\site-packages\adodbapi\apibase.py:589:    def __init__(self, ado_results, numberOfRows, cursor):
+venv\Lib\site-packages\adodbapi\apibase.py:592:            self.recordset_format = cursor.recordset_format
+venv\Lib\site-packages\adodbapi\apibase.py:593:            self.numberOfColumns = cursor.numberOfColumns
+venv\Lib\site-packages\adodbapi\apibase.py:594:            self.converters = cursor.converters
+venv\Lib\site-packages\adodbapi\apibase.py:595:            self.columnNames = cursor.columnNames
+venv\Lib\site-packages\adodbapi\examples\db_print.py:39:    # make a cursor on the connection
+venv\Lib\site-packages\adodbapi\examples\db_print.py:40:    with con.cursor() as c:
+venv\Lib\site-packages\adodbapi\examples\db_print.py:41:        # run an SQL statement on the cursor
+venv\Lib\site-packages\adodbapi\examples\xls_read.py:35:crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\examples\xls_write.py:22:    with conn.cursor() as crsr:
+venv\Lib\site-packages\adodbapi\process_connect_string.py:7:    """allow the programmer to perform limited processing on the server by passing macro names and args
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:66:    def getCursor(self):
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:67:        return self.getConnection().cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:70:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:71:        assert crsr.__class__.__name__ == "Cursor"
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:75:        mycallable = lambda connection, cursor, errorclass, errorvalue: 1
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:77:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:87:            conn.commit()  # Should not be able to use connection after it is closed
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:95:            lambda connection, cursor, errorclass, errorvalue: 1
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:100:        conn.commit()  # Should not be able to use connection after it is closed
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:106:            conn.commit()  # Should not be able to use connection after it is closed
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:114:    def testDefaultErrorHandlerCursor(self):
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:115:        crsr = self.getConnection().cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:124:    def testOwnErrorHandlerCursor(self):
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:126:            lambda connection, cursor, errorclass, errorvalue: 1
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:128:        crsr = self.getConnection().cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:154:            crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:246:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:517:        with conn.cursor() as crsr:
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:544:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:557:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:567:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:579:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:584:        ):  # using cursor as an iterator, rather than fetchxxx
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:589:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:608:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:619:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:629:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:641:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:663:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:731:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:791:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:837:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:886:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:957:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:972:        ), "cursor.fetchone should return None if a query retrieves no rows"
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:984:        crsr = con2.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:997:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:998:        with conn.cursor() as crsr:
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1011:        crsr = con2.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1020:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1030:        ), f"cursor.fetchone should return None if a query retrieves no rows. Got {row!r}"
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1038:        crsr = ac_conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1042:        with self.getCursor() as crsr:
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1058:        crsr = ac_conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1064:        with self.getCursor() as crsr:
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1088:        crsr = conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1103:        with self.getCursor() as crsr:
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1145:        crsr = self.conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1172:        crsr = self.getCursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1206:        crsr = self.conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1231:        crsr = self.conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1329:    #     crsr = self.conn.cursor()
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1336:    #             DELIMITER $$
+venv\Lib\site-packages\adodbapi\test\adodbapitest.py:1395:    #     crsr = self.conn.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:64:# Implement suggestions and code from Henrik Eklund - test that cursor.arraysize
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:65:# defaults to 1 & generic cursor.callproc test added
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:79:# - cursor.rowcount being checked after various execute and fetchXXX methods
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:80:# - Check for fetchall and fetchmany returning empty lists after results
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:124:    # a 'commit' after the execute.
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:125:    def executeDDL1(self, cursor):
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:126:        cursor.execute(self.ddl1)
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:128:    def executeDDL2(self, cursor):
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:129:        cursor.execute(self.ddl2)
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:145:                cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:254:    def test_cursor(self):
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:257:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:261:    def test_cursor_isolation(self):
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:264:            # Make sure cursors created from the same connection have
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:266:            cur1 = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:267:            cur2 = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:283:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:288:                "cursor.description should be none after executing a "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:293:                len(cur.description), 1, "cursor.description describes too many columns"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:298:                "cursor.description[x] tuples must have 7 elements",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:303:                "cursor.description[x][0] must return column name",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:308:                "cursor.description[x][1] must return column type. Got %r"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:317:                "cursor.description not being set to None when executing "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:326:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:330:                "cursor.rowcount should be -1 or 0 after executing no-result "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:338:                "cursor.rowcount should == number or rows inserted, or "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:339:                "set to -1 after executing an insert statement",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:344:                "cursor.rowcount should == number of rows returned, or "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:345:                "set to -1 after executing a select statement",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:351:                "cursor.rowcount not being reset to -1 after executing "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:362:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:377:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:381:        # cursor.execute should raise an Error if called after connection
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:385:        # connection.commit should raise an Error if called after connection'
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:401:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:450:        self.assertEqual(len(res), 2, "cursor.fetchall returned too few rows")
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:456:            "cursor.fetchall retrieved incorrect data, or data inserted incorrectly",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:461:            "cursor.fetchall retrieved incorrect data, or data inserted incorrectly",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:467:            "cursor.fetchall retrieved incorrect data, or data inserted "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:473:            "cursor.fetchall retrieved incorrect data, or data inserted "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:480:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:509:                "insert using cursor.executemany set cursor.rowcount to "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:515:                len(res), 2, "cursor.fetchall retrieved incorrect number of rows"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:529:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:531:            # cursor.fetchone should raise an Error if called before
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:535:            # cursor.fetchone should raise an Error if called after
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:544:                "cursor.fetchone should return None if a query retrieves no rows",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:548:            # cursor.fetchone should raise an Error if called after
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:558:                len(r), 1, "cursor.fetchone should have retrieved a single row"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:561:                r[0], "Victoria Bitter", "cursor.fetchone retrieved incorrect data"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:566:                "cursor.fetchone should return None if no more rows available",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:594:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:596:            # cursor.fetchmany should raise an Error if called without
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:609:                "cursor.fetchmany retrieved incorrect number of rows, "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:615:                len(r), 3, "cursor.fetchmany retrieved incorrect number of rows"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:619:                len(r), 2, "cursor.fetchmany retrieved incorrect number of rows"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:625:                "cursor.fetchmany should return an empty sequence after "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:630:            # Same as above, using cursor.arraysize
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:635:                len(r), 4, "cursor.arraysize not being honoured by fetchmany"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:657:                    "incorrect data retrieved by cursor.fetchmany",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:664:                "cursor.fetchmany should return an empty sequence if "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:665:                "called after the whole result set has been fetched",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:675:                "cursor.fetchmany should return an empty sequence if "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:686:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:687:            # cursor.fetchall should raise an Error if called
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:696:            # cursor.fetchall should raise an Error if called
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:697:            # after executing a a statement that cannot return rows
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:706:                "cursor.fetchall did not retrieve all rows",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:712:                    rows[i], self.samples[i], "cursor.fetchall retrieved incorrect rows"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:718:                "cursor.fetchall should return an empty list if called "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:719:                "after the whole result set has been fetched",
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:730:                "cursor.fetchall should return an empty list if "
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:740:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:786:        "If cleaning up is needed after nextSetTest"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:797:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:799:                hasattr(cur, "arraysize"), "cursor.arraysize must be defined"
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:807:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:809:            self._paraminsert(cur)  # Make sure cursor still works
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:817:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:820:            self._paraminsert(cur)  # Make sure the cursor still works
+venv\Lib\site-packages\adodbapi\test\dbapi20.py:831:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\test_adodbapi_dbapi20.py:121:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\test_adodbapi_dbapi20.py:134:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\test\test_adodbapi_dbapi20.py:158:        "If cleaning up is needed after nextSetTest"
+venv\Lib\site-packages\adodbapi\test\test_adodbapi_dbapi20.py:167:            cur = con.cursor()
+venv\Lib\site-packages\adodbapi\__init__.py:12:    Cursor as Cursor,
+venv\Lib\site-packages\aliyunsdkcore\acs_exception\error_code.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\acs_exception\error_msg.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\acs_exception\error_type.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\acs_exception\exceptions.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\algorithm\sha_hmac1.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\algorithm\sha_hmac256.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\composer\roa_signature_composer.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\composer\rpc_signature_composer.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\signers\access_key_signer.py:19:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\signers\ecs_ram_role_signer.py:19:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\signers\ram_role_arn_signer.py:19:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\signers\signer.py:19:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\auth\signers\sts_token_signer.py:19:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\client.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\chained_endpoint_resolver.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\default_endpoint_resolver.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\endpoint\endpoint_resolver_base.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\endpoint_resolver_rules.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\local_config_global_endpoint_resolver.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\local_config_regional_endpoint_resolver.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\location\DescribeEndpointsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\location_service_endpoint_resolver.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\resolver_endpoint_request.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\user_customized_endpoint_resolver.py:16:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\endpoint\__init__.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\http\format_type.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\http\http_request.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\http\http_response.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\http\method_type.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\http\protocol_type.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\profile\region_provider.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\request.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\retry\backoff_strategy.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\retry\backoff_strategy.py:43:    MAX_RETRY_LIMIT = 30   # to avoid integer overflow during delay calculation
+venv\Lib\site-packages\aliyunsdkcore\retry\backoff_strategy.py:50:        retries = min(self.MAX_RETRY_LIMIT, retry_policy_context.retries_attempted)
+venv\Lib\site-packages\aliyunsdkcore\retry\retry_condition.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\retry\retry_policy.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\retry\retry_policy_context.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\retry\__init__.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\utils\parameter_helper.py:15:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkcore\utils\validation.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\utils\__init__.py:13:# limitations under the License.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:55:DEFAULT_REDIRECT_LIMIT = 30
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:290:        # after prepare_cookies is called
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:314:        # This MUST go after prepare_auth. Authenticators could add a hook
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:779:    def iter_lines(self, chunk_size=ITER_CHUNK_SIZE, decode_unicode=None, delimiter=None):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:794:            if delimiter:
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\models.py:795:                lines = chunk.split(delimiter)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\charsetprober.py:74:        The input buffer can be thought to contain a series of words delimited
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\charsetprober.py:132:                    # Keep everything after last non-extended-ASCII,
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\charsetprober.py:135:                    # Output a space to delimit stretch we kept
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\charsetprober.py:141:            # Keep everything after last non-extended-ASCII, non-alphabetic
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\hebrewprober.py:169:        # a word delimiter at the beginning of the data
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\hebrewprober.py:184:        # 'lechotet' (to chat) containing an apostrophe after the tsadi. This
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\langthaimodel.py:33:# The following result for thai was collected from a limited sample (1M).
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\sbcsgroupprober.py:58:            #       after we retrain model.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\chardet\universaldetector.py:116:        After calling ``feed``, you can check the value of the ``done``
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connection.py:61:# after 2016-01-01 (today - 2 years) AND before 2017-07-01 (today - 6 months)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connection.py:219:        # After the if clause, to always have a closed body
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:119:        fine-grained control over request timeouts. After the constructor has
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:282:        Called right before a request is made, after the socket is created.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:661:            log.warning("Retrying (%r) after connection "
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:708:        has_retry_after = bool(response.getheader('Retry-After'))
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:709:        if retries.is_retry(method, response.status, has_retry_after):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\connectionpool.py:833:        Called right before a request is made, after the socket is created.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:19:There are `limitations <https://cloud.google.com/appengine/docs/python/\
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:20:urlfetch/#Python_Quotas_and_limits>`_ to the URLFetch service and it may not be
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:26:   limitations.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:28:   Sockets also have `limitations and restrictions
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:30:   #limitations-and-restrictions>`_ and have a lower free quota than URLFetch.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:84:    emulated httplib, and is subject to URLFetch limitations as described in
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:207:        has_retry_after = bool(http_response.getheader('Retry-After'))
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\appengine.py:208:        if retries.is_retry(method, http_response.status, has_retry_after):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\securetransport.py:81:# Limit writes to 16kB. This is OpenSSL's limit, but we'll cargo-cult it over
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\securetransport.py:82:# for no better reason than we need *a* limit, and this one is right there.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\securetransport.py:319:        context manager will correctly propagate the exception after the fact.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\socks.py:16:Known Limitations:
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\_securetransport\bindings.py:16:    to deal in the Software without restriction, including without limitation
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\_securetransport\bindings.py:25:    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\contrib\_securetransport\low_level.py:281:    # artificial limitation of macOS (for example, it doesn't necessarily
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\exceptions.py:131:    "Raised when a request enters a pool after the pool has been closed."
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\six.py:5:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\six.py:14:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\six.py:86:    """Import module, returning the module after the last dot."""
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\six.py:826:    # function does on Python versions after 3.2. It sets the ``__wrapped__``
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\socks.py:17:WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\packages\socks.py:21:LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\poolmanager.py:204:        re-used after completion.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\response.py:80:                # Ignore data after the first error
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\response.py:424:            after having ``.read()`` the file object. (Overridden if ``amt`` is
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:73:        These errors are raised after the request was sent to the server, so the
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:79:        How many redirects to perform. Limit this to avoid infinite redirect
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:114:        A backoff factor to apply between attempts after the second try
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:139:    :param bool respect_retry_after_header:
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:140:        Whether to respect Retry-After header on status codes defined as
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:141:        :attr:`Retry.RETRY_AFTER_STATUS_CODES` or not.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:152:    RETRY_AFTER_STATUS_CODES = frozenset([413, 429, 503])
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:162:                 history=None, respect_retry_after_header=True,
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:181:        self.respect_retry_after_header = respect_retry_after_header
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:228:    def parse_retry_after(self, retry_after):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:230:        if re.match(r"^\s*[0-9]+\s*$", retry_after):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:231:            seconds = int(retry_after)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:233:            retry_date_tuple = email.utils.parsedate(retry_after)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:235:                raise InvalidHeader("Invalid Retry-After header: %s" % retry_after)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:244:    def get_retry_after(self, response):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:245:        """ Get the value of Retry-After in seconds. """
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:247:        retry_after = response.getheader("Retry-After")
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:249:        if retry_after is None:
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:252:        return self.parse_retry_after(retry_after)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:255:        retry_after = self.get_retry_after(response)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:256:        if retry_after:
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:257:            time.sleep(retry_after)
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:271:        This method will respect a server's ``Retry-After`` response header
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:291:        """ Errors that occur after the request has been started, so we should
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:305:    def is_retry(self, method, status_code, has_retry_after=False):
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:308:        respect the Retry-After header, whether this header is present, and
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:318:        return (self.total and self.respect_retry_after_header and
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\retry.py:319:                has_retry_after and (status_code in self.RETRY_AFTER_STATUS_CODES))
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\selectors.py:195:            # Raise ValueError after all.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\timeout.py:85:        If your goal is to cut off any request after a set amount of wall clock
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\url.py:105:    Given a string and an iterable of delimiters, split on the first found
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\url.py:106:    delimiter. Return two split parts and the matched delimiter.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\util\wait.py:127:    # decision if someone goes wild with monkeypatching select.poll after
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\packages\urllib3\__init__.py:62:    Returns the handler after adding it.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\sessions.py:19:from .models import Request, PreparedRequest, DEFAULT_REDIRECT_LIMIT
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\sessions.py:374:        #: limit, a :class:`TooManyRedirects` exception is raised.
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\sessions.py:375:        #: This defaults to requests.models.DEFAULT_REDIRECT_LIMIT, which is
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\sessions.py:377:        self.max_redirects = DEFAULT_REDIRECT_LIMIT
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\status_codes.py:80:    509: ('bandwidth_limit_exceeded', 'bandwidth'),
+venv\Lib\site-packages\aliyunsdkcore\vendored\requests\utils.py:276:    middle.  Quotes are removed automatically after parsing.
+venv\Lib\site-packages\aliyunsdkcore\vendored\six.py:5:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\aliyunsdkcore\vendored\six.py:14:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\aliyunsdkcore\vendored\six.py:86:    """Import module, returning the module after the last dot."""
+venv\Lib\site-packages\aliyunsdkcore\vendored\six.py:826:    # function does on Python versions after 3.2. It sets the ``__wrapped__``
+venv\Lib\site-packages\aliyunsdkkms\endpoint.py:17:# # specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\AdvanceEncryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\AsymmetricDecryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\AsymmetricEncryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\AsymmetricSignRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\AsymmetricVerifyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CancelKeyDeletionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CertificatePrivateKeyDecryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CertificatePrivateKeySignRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CertificatePublicKeyEncryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CertificatePublicKeyVerifyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ConnectKmsInstanceRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateAliasRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateApplicationAccessPointRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateCertificateRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateClientKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateClientKeyRequest.py:40:	def get_NotAfter(self): # String
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateClientKeyRequest.py:41:		return self.get_query_params().get('NotAfter')
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateClientKeyRequest.py:43:	def set_NotAfter(self, NotAfter):  # String
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateClientKeyRequest.py:44:		self.add_query_param('NotAfter', NotAfter)
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateKeyVersionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateNetworkRuleRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreatePolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\CreateSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DecryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteAliasRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteApplicationAccessPointRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteCertificateRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteClientKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteKeyMaterialRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteNetworkRuleRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeletePolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DeleteSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeAccountKmsStatusRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeApplicationAccessPointRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeCertificateRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeKeyVersionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeNetworkRuleRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribePolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeRegionsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DescribeSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\DisableKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\EnableKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\EncryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ExportDataKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GenerateAndExportDataKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GenerateDataKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GenerateDataKeyWithoutPlaintextRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetCertificateRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetClientKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetKeyPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetKmsInstanceRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetParametersForImportRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetPublicKeyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetRandomPasswordRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetSecretPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\GetSecretValueRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ImportKeyMaterialRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListAliasesByKeyIdRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListAliasesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListApplicationAccessPointsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListClientKeysRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListKeysRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListKeyVersionsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListKmsInstancesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListNetworkRulesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListPoliciesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListResourceTagsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListSecretsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListSecretVersionIdsRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ListTagResourcesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\OpenKmsServiceRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\PutSecretValueRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ReEncryptRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\RestoreSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\RotateSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\ScheduleKeyDeletionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\SetDeletionProtectionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\SetKeyPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\SetSecretPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\TagResourceRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\TagResourcesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UntagResourceRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UntagResourcesRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateAliasRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateApplicationAccessPointRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateCertificateStatusRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateKeyDescriptionRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateKmsInstanceBindVpcRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateNetworkRuleRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdatePolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateRotationPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateSecretRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateSecretRotationPolicyRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UpdateSecretVersionStageRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\aliyunsdkkms\request\v20160120\UploadCertificateRequest.py:17:# specific language governing permissions and limitations
+venv\Lib\site-packages\anyio\abc\_streams.py:111:        You should not try to send any further data to this stream after calling this method.
+venv\Lib\site-packages\anyio\abc\_streams.py:167:        You should not try to send any further data to this stream after calling this method.
+venv\Lib\site-packages\anyio\abc\__init__.py:35:    "CapacityLimiter",
+venv\Lib\site-packages\anyio\abc\__init__.py:81:from .._core._synchronization import CapacityLimiter, Condition, Event, Lock, Semaphore
+venv\Lib\site-packages\anyio\streams\buffered.py:6:from .. import ClosedResourceError, DelimiterNotFound, EndOfStream, IncompleteRead
+venv\Lib\site-packages\anyio\streams\buffered.py:82:    async def receive_until(self, delimiter: bytes, max_bytes: int) -> bytes:
+venv\Lib\site-packages\anyio\streams\buffered.py:84:        Read from the stream until the delimiter is found or max_bytes have been read.
+venv\Lib\site-packages\anyio\streams\buffered.py:86:        :param delimiter: the marker to look for in the stream
+venv\Lib\site-packages\anyio\streams\buffered.py:88:            :exc:`~anyio.DelimiterNotFound`
+venv\Lib\site-packages\anyio\streams\buffered.py:89:        :return: the bytes read (not including the delimiter)
+venv\Lib\site-packages\anyio\streams\buffered.py:90:        :raises ~anyio.IncompleteRead: if the stream was closed before the delimiter
+venv\Lib\site-packages\anyio\streams\buffered.py:92:        :raises ~anyio.DelimiterNotFound: if the delimiter is not found within the
+venv\Lib\site-packages\anyio\streams\buffered.py:96:        delimiter_size = len(delimiter)
+venv\Lib\site-packages\anyio\streams\buffered.py:99:            # Check if the delimiter can be found in the current buffer
+venv\Lib\site-packages\anyio\streams\buffered.py:100:            index = self._buffer.find(delimiter, offset)
+venv\Lib\site-packages\anyio\streams\buffered.py:103:                del self._buffer[: index + len(delimiter) :]
+venv\Lib\site-packages\anyio\streams\buffered.py:106:            # Check if the buffer is already at or over the limit
+venv\Lib\site-packages\anyio\streams\buffered.py:108:                raise DelimiterNotFound(max_bytes)
+venv\Lib\site-packages\anyio\streams\buffered.py:117:            offset = max(len(self._buffer) - delimiter_size + 1, 0)
+venv\Lib\site-packages\anyio\streams\tls.py:255:    :param handshake_timeout: time limit for the TLS handshake
+venv\Lib\site-packages\anyio\streams\tls.py:256:        (passed to :func:`~anyio.fail_after`)
+venv\Lib\site-packages\anyio\streams\tls.py:297:            from .. import fail_after
+venv\Lib\site-packages\anyio\streams\tls.py:300:                with fail_after(self.handshake_timeout):
+venv\Lib\site-packages\anyio\to_process.py:14:from ._core._synchronization import CapacityLimiter
+venv\Lib\site-packages\anyio\to_process.py:15:from ._core._tasks import CancelScope, fail_after
+venv\Lib\site-packages\anyio\to_process.py:27:_default_process_limiter: RunVar[CapacityLimiter] = RunVar("_default_process_limiter")
+venv\Lib\site-packages\anyio\to_process.py:34:    limiter: CapacityLimiter | None = None,
+venv\Lib\site-packages\anyio\to_process.py:46:    :param limiter: capacity limiter to use to limit the total amount of processes running
+venv\Lib\site-packages\anyio\to_process.py:47:        (if omitted, the default limiter is used)
+venv\Lib\site-packages\anyio\to_process.py:99:    async with (limiter or current_default_process_limiter()):
+venv\Lib\site-packages\anyio\to_process.py:141:                with fail_after(20):
+venv\Lib\site-packages\anyio\to_process.py:173:def current_default_process_limiter() -> CapacityLimiter:
+venv\Lib\site-packages\anyio\to_process.py:175:    Return the capacity limiter that is used by default to limit the number of worker processes.
+venv\Lib\site-packages\anyio\to_process.py:177:    :return: a capacity limiter object
+venv\Lib\site-packages\anyio\to_process.py:181:        return _default_process_limiter.get()
+venv\Lib\site-packages\anyio\to_process.py:183:        limiter = CapacityLimiter(os.cpu_count() or 2)
+venv\Lib\site-packages\anyio\to_process.py:184:        _default_process_limiter.set(limiter)
+venv\Lib\site-packages\anyio\to_process.py:185:        return limiter
+venv\Lib\site-packages\anyio\to_thread.py:7:from .abc import CapacityLimiter
+venv\Lib\site-packages\anyio\to_thread.py:16:    limiter: CapacityLimiter | None = None,
+venv\Lib\site-packages\anyio\to_thread.py:28:    :param limiter: capacity limiter to use to limit the total amount of threads running
+venv\Lib\site-packages\anyio\to_thread.py:29:        (if omitted, the default limiter is used)
+venv\Lib\site-packages\anyio\to_thread.py:34:        func, *args, cancellable=cancellable, limiter=limiter
+venv\Lib\site-packages\anyio\to_thread.py:42:    limiter: CapacityLimiter | None = None,
+venv\Lib\site-packages\anyio\to_thread.py:48:    return await run_sync(func, *args, cancellable=cancellable, limiter=limiter)
+venv\Lib\site-packages\anyio\to_thread.py:51:def current_default_thread_limiter() -> CapacityLimiter:
+venv\Lib\site-packages\anyio\to_thread.py:53:    Return the capacity limiter that is used by default to limit the number of concurrent threads.
+venv\Lib\site-packages\anyio\to_thread.py:55:    :return: a capacity limiter object
+venv\Lib\site-packages\anyio\to_thread.py:58:    return get_asynclib().current_default_thread_limiter()
+venv\Lib\site-packages\anyio\to_thread.py:61:def current_default_worker_thread_limiter() -> CapacityLimiter:
+venv\Lib\site-packages\anyio\to_thread.py:63:        "current_default_worker_thread_limiter() has been deprecated, "
+venv\Lib\site-packages\anyio\to_thread.py:64:        "use anyio.to_thread.current_default_thread_limiter() instead",
+venv\Lib\site-packages\anyio\to_thread.py:67:    return current_default_thread_limiter()
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:51:from .. import CapacityLimiterStatistics, EventStatistics, TaskInfo, abc
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:63:from .._core._synchronization import CapacityLimiter as BaseCapacityLimiter
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:737:        # If the task raises an exception after sending a start value without a switch point
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:838:    limiter: CapacityLimiter | None = None,
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:852:    async with (limiter or current_default_thread_limiter()):
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1126:        cast(asyncio.Transport, transport).set_write_buffer_limits(0)
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1401:                    # The ignore can be removed after mypy picks up
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1785:class CapacityLimiter(BaseCapacityLimiter):
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1788:    def __new__(cls, total_tokens: float) -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1847:                "this borrower is already holding one of this CapacityLimiter's "
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1889:                "this borrower isn't holding any of this CapacityLimiter's " "tokens"
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1892:        # Notify the next task in line if this limiter has free capacity now
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1897:    def statistics(self) -> CapacityLimiterStatistics:
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1898:        return CapacityLimiterStatistics(
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1906:_default_thread_limiter: RunVar[CapacityLimiter] = RunVar("_default_thread_limiter")
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1909:def current_default_thread_limiter() -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1911:        return _default_thread_limiter.get()
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1913:        limiter = CapacityLimiter(40)
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1914:        _default_thread_limiter.set(limiter)
+venv\Lib\site-packages\anyio\_backends\_asyncio.py:1915:        return limiter
+venv\Lib\site-packages\anyio\_backends\_trio.py:39:from .. import CapacityLimiterStatistics, EventStatistics, TaskInfo, abc
+venv\Lib\site-packages\anyio\_backends\_trio.py:50:from .._core._synchronization import CapacityLimiter as BaseCapacityLimiter
+venv\Lib\site-packages\anyio\_backends\_trio.py:221:    limiter: trio.CapacityLimiter | None = None,
+venv\Lib\site-packages\anyio\_backends\_trio.py:231:        context.run, wrapper, cancellable=cancellable, limiter=limiter
+venv\Lib\site-packages\anyio\_backends\_trio.py:414:    def after_run(self) -> None:
+venv\Lib\site-packages\anyio\_backends\_trio.py:415:        super().after_run()
+venv\Lib\site-packages\anyio\_backends\_trio.py:418:current_default_worker_process_limiter: RunVar = RunVar(
+venv\Lib\site-packages\anyio\_backends\_trio.py:419:    "current_default_worker_process_limiter"
+venv\Lib\site-packages\anyio\_backends\_trio.py:750:class CapacityLimiter(BaseCapacityLimiter):
+venv\Lib\site-packages\anyio\_backends\_trio.py:751:    def __new__(cls, *args: object, **kwargs: object) -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_backends\_trio.py:755:        self, *args: Any, original: trio.CapacityLimiter | None = None
+venv\Lib\site-packages\anyio\_backends\_trio.py:757:        self.__original = original or trio.CapacityLimiter(*args)
+venv\Lib\site-packages\anyio\_backends\_trio.py:806:    def statistics(self) -> CapacityLimiterStatistics:
+venv\Lib\site-packages\anyio\_backends\_trio.py:808:        return CapacityLimiterStatistics(
+venv\Lib\site-packages\anyio\_backends\_trio.py:816:_capacity_limiter_wrapper: RunVar = RunVar("_capacity_limiter_wrapper")
+venv\Lib\site-packages\anyio\_backends\_trio.py:819:def current_default_thread_limiter() -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_backends\_trio.py:821:        return _capacity_limiter_wrapper.get()
+venv\Lib\site-packages\anyio\_backends\_trio.py:823:        limiter = CapacityLimiter(
+venv\Lib\site-packages\anyio\_backends\_trio.py:824:            original=trio.to_thread.current_default_thread_limiter()
+venv\Lib\site-packages\anyio\_backends\_trio.py:826:        _capacity_limiter_wrapper.set(limiter)
+venv\Lib\site-packages\anyio\_backends\_trio.py:827:        return limiter
+venv\Lib\site-packages\anyio\_core\_exceptions.py:31:class DelimiterNotFound(Exception):
+venv\Lib\site-packages\anyio\_core\_exceptions.py:34:    maximum number of bytes has been read without the delimiter being found.
+venv\Lib\site-packages\anyio\_core\_exceptions.py:39:            f"The delimiter was not found among the first {max_bytes} bytes"
+venv\Lib\site-packages\anyio\_core\_sockets.py:27:from ._tasks import create_task_group, move_on_after
+venv\Lib\site-packages\anyio\_core\_sockets.py:220:            with move_on_after(happy_eyeballs_delay):
+venv\Lib\site-packages\anyio\_core\_synchronization.py:26:class CapacityLimiterStatistics:
+venv\Lib\site-packages\anyio\_core\_synchronization.py:31:        limiter
+venv\Lib\site-packages\anyio\_core\_synchronization.py:32:    :ivar int tasks_waiting: number of tasks waiting on :meth:`~.CapacityLimiter.acquire` or
+venv\Lib\site-packages\anyio\_core\_synchronization.py:33:        :meth:`~.CapacityLimiter.acquire_on_behalf_of`
+venv\Lib\site-packages\anyio\_core\_synchronization.py:378:class CapacityLimiter:
+venv\Lib\site-packages\anyio\_core\_synchronization.py:379:    def __new__(cls, total_tokens: float) -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_core\_synchronization.py:380:        return get_asynclib().CapacityLimiter(total_tokens)
+venv\Lib\site-packages\anyio\_core\_synchronization.py:399:        proportionate number of tasks waiting on this limiter will be granted their tokens.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:413:            "CapacityLimiter.set_total_tokens has been deprecated. Set the value of the"
+venv\Lib\site-packages\anyio\_core\_synchronization.py:467:        :raises RuntimeError: if the current task has not borrowed a token from this limiter.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:476:        :raises RuntimeError: if the borrower has not borrowed a token from this limiter.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:481:    def statistics(self) -> CapacityLimiterStatistics:
+venv\Lib\site-packages\anyio\_core\_synchronization.py:483:        Return statistics about the current state of this limiter.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:557:def create_capacity_limiter(total_tokens: float) -> CapacityLimiter:
+venv\Lib\site-packages\anyio\_core\_synchronization.py:559:    Create a capacity limiter.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:563:    :return: a capacity limiter object
+venv\Lib\site-packages\anyio\_core\_synchronization.py:566:       Use :class:`~CapacityLimiter` directly.
+venv\Lib\site-packages\anyio\_core\_synchronization.py:570:        "create_capacity_limiter() is deprecated -- use CapacityLimiter() directly",
+venv\Lib\site-packages\anyio\_core\_synchronization.py:573:    return get_asynclib().CapacityLimiter(total_tokens)
+venv\Lib\site-packages\anyio\_core\_tasks.py:104:class FailAfterContextManager(DeprecatedAsyncContextManager[CancelScope]):
+venv\Lib\site-packages\anyio\_core\_tasks.py:124:def fail_after(delay: float | None, shield: bool = False) -> FailAfterContextManager:
+venv\Lib\site-packages\anyio\_core\_tasks.py:139:    return FailAfterContextManager(cancel_scope)
+venv\Lib\site-packages\anyio\_core\_tasks.py:142:def move_on_after(delay: float | None, shield: bool = False) -> CancelScope:
+venv\Lib\site-packages\anyio\_core\_tasks.py:144:    Create a cancel scope with a deadline that expires after the given delay.
+venv\Lib\site-packages\anyio\__init__.py:17:    "DelimiterNotFound",
+venv\Lib\site-packages\anyio\__init__.py:43:    "CapacityLimiter",
+venv\Lib\site-packages\anyio\__init__.py:44:    "CapacityLimiterStatistics",
+venv\Lib\site-packages\anyio\__init__.py:56:    "create_capacity_limiter",
+venv\Lib\site-packages\anyio\__init__.py:58:    "fail_after",
+venv\Lib\site-packages\anyio\__init__.py:59:    "move_on_after",
+venv\Lib\site-packages\anyio\__init__.py:71:    "current_default_worker_thread_limiter",
+venv\Lib\site-packages\anyio\__init__.py:96:    DelimiterNotFound,
+venv\Lib\site-packages\anyio\__init__.py:121:    CapacityLimiter,
+venv\Lib\site-packages\anyio\__init__.py:122:    CapacityLimiterStatistics,
+venv\Lib\site-packages\anyio\__init__.py:131:    create_capacity_limiter,
+venv\Lib\site-packages\anyio\__init__.py:142:    fail_after,
+venv\Lib\site-packages\anyio\__init__.py:143:    move_on_after,
+venv\Lib\site-packages\anyio\__init__.py:156:from .to_thread import current_default_worker_thread_limiter, run_sync_in_worker_thread
+venv\Lib\site-packages\cffi\api.py:156:        """Close a library obtained with ffi.dlopen().  After this call,
+venv\Lib\site-packages\cffi\api.py:270:                      should_clear_after_alloc=True):
+venv\Lib\site-packages\cffi\api.py:280:        If 'should_clear_after_alloc' is set to False, then the memory
+venv\Lib\site-packages\cffi\api.py:286:                                               should_clear_after_alloc)
+venv\Lib\site-packages\cffi\cffi_opcode.py:19:                raise OverflowError("cannot emit %r: limited to 2**31-1"
+venv\Lib\site-packages\cffi\commontypes.py:35:            raise FFIError("The Windows type %r is only available after "
+venv\Lib\site-packages\cffi\commontypes.py:41:        "http://cffi.readthedocs.io/en/latest/cdef.html#ffi-cdef-limitations "
+venv\Lib\site-packages\cffi\cparser.py:60:    # afterwards.  But "char(*const(***))" gives us the right syntax
+venv\Lib\site-packages\cffi\cparser.py:871:        # for now, limited to expressions that are an immediate number
+venv\Lib\site-packages\cffi\model.py:189:        raise NotImplementedError("integer type '%s' can only be used after "
+venv\Lib\site-packages\cffi\model.py:200:        raise NotImplementedError("float type '%s' can only be used after "
+venv\Lib\site-packages\cffi\recompiler.py:10:USE_LIMITED_API = (sys.platform != 'win32' or sys.version_info < (3, 0) or
+venv\Lib\site-packages\cffi\recompiler.py:300:        if not USE_LIMITED_API:
+venv\Lib\site-packages\cffi\recompiler.py:301:            prnt('#define _CFFI_NO_LIMITED_API')
+venv\Lib\site-packages\cffi\recompiler.py:1313:        prnt('// # NB. this is not a string because of a size limit in MSVC')
+venv\Lib\site-packages\cffi\setuptools_ext.py:73:def _set_py_limited_api(Extension, kwds):
+venv\Lib\site-packages\cffi\setuptools_ext.py:75:    Add py_limited_api to kwds if setuptools >= 26 is in use.
+venv\Lib\site-packages\cffi\setuptools_ext.py:85:    On Windows, with CPython <= 3.4, it's better not to use py_limited_api
+venv\Lib\site-packages\cffi\setuptools_ext.py:88:    we'll give it another try and set py_limited_api on Windows >= 3.5.
+venv\Lib\site-packages\cffi\setuptools_ext.py:92:    if ('py_limited_api' not in kwds and not hasattr(sys, 'gettotalrefcount')
+venv\Lib\site-packages\cffi\setuptools_ext.py:93:            and recompiler.USE_LIMITED_API):
+venv\Lib\site-packages\cffi\setuptools_ext.py:98:                kwds['py_limited_api'] = True
+venv\Lib\site-packages\cffi\setuptools_ext.py:101:            # try to set 'py_limited_api' anyway.  At worst, we get a
+venv\Lib\site-packages\cffi\setuptools_ext.py:103:            kwds['py_limited_api'] = True
+venv\Lib\site-packages\cffi\setuptools_ext.py:108:    # We are a setuptools extension. Need this build_ext for py_limited_api.
+venv\Lib\site-packages\cffi\setuptools_ext.py:116:    kwds = _set_py_limited_api(Extension, kwds)
+venv\Lib\site-packages\cffi\vengine_cpy.py:29:        # Note that after a setuptools installation, there are both .py
+venv\Lib\site-packages\charset_normalizer\api.py:49:    And will give up a particular code page after 20% of measured mess. Those criteria are customizable at will.
+venv\Lib\site-packages\charset_normalizer\api.py:88:            "limited list of encoding allowed : %s.",
+venv\Lib\site-packages\charset_normalizer\api.py:99:            "limited list of encoding excluded : %s.",
+venv\Lib\site-packages\charset_normalizer\api.py:332:                "LazyStr Loading: After MD chunk decode, code page %s does not fit given bytes sequence at ALL. %s",
+venv\Lib\site-packages\charset_normalizer\api.py:351:                    "LazyStr Loading: After final lookup, code page %s does not fit given bytes sequence at ALL. %s",
+venv\Lib\site-packages\charset_normalizer\cd.py:220:        characters_after_source: list[str] = FREQUENCIES[language][
+venv\Lib\site-packages\charset_normalizer\cd.py:224:        characters_after: list[str] = ordered_characters[character_rank:]
+venv\Lib\site-packages\charset_normalizer\cd.py:230:        after_match_count: int = len(
+venv\Lib\site-packages\charset_normalizer\cd.py:231:            set(characters_after) & set(characters_after_source)
+venv\Lib\site-packages\charset_normalizer\cd.py:238:        if len(characters_after_source) == 0 and after_match_count <= 4:
+venv\Lib\site-packages\charset_normalizer\cd.py:244:            or after_match_count / len(characters_after_source) >= 0.4
+venv\Lib\site-packages\click\core.py:1025:        the application after a call.  If this is not wanted, ``SystemExit``
+venv\Lib\site-packages\click\core.py:1177:                   help page after everything else.
+venv\Lib\site-packages\click\core.py:1337:    def get_short_help_str(self, limit: int = 45) -> str:
+venv\Lib\site-packages\click\core.py:1344:            text = make_default_short_help(self.help, limit)
+venv\Lib\site-packages\click\core.py:1622:        after the options.
+venv\Lib\site-packages\click\core.py:1637:            limit = formatter.width - 6 - max(len(cmd[0]) for cmd in commands)
+venv\Lib\site-packages\click\core.py:1641:                help = cmd.get_short_help_str(limit)
+venv\Lib\site-packages\click\core.py:1699:        # In chain mode we create the contexts step by step, but after the
+venv\Lib\site-packages\click\core.py:2036:        after type conversion. It is called as ``f(ctx, param, value)``
+venv\Lib\site-packages\click\parser.py:15:by the Python Software Foundation. This is limited to code in parser.py.
+venv\Lib\site-packages\click\parser.py:257:    parse options and arguments.  It's modelled after optparse and brings
+venv\Lib\site-packages\click\parser.py:281:        #: after shifting all the unknown options into the resulting args.
+venv\Lib\site-packages\click\parser.py:384:        # then after _process_arg() is done the situation is:
+venv\Lib\site-packages\click\termui.py:437:    the whole visible space of the terminal and moving the cursor to the
+venv\Lib\site-packages\click\termui.py:445:    # ANSI escape \033[2J clears the screen, \033[1;1H moves the cursor
+venv\Lib\site-packages\click\types.py:588:        # Could use Python 3.9's math.nextafter here, but clamping an
+venv\Lib\site-packages\click\types.py:645:    is automatically closed once the context tears down (after the command
+venv\Lib\site-packages\click\utils.py:245:    :param nl: Print a newline after the message. Enabled by default.
+venv\Lib\site-packages\click\_compat.py:404:            " if that's what you're after."
+venv\Lib\site-packages\click\_termui_impl.py:33:    AFTER_BAR = "\n"
+venv\Lib\site-packages\click\_termui_impl.py:36:    AFTER_BAR = "\033[?25h\n"
+venv\Lib\site-packages\click\_termui_impl.py:139:        self.file.write(AFTER_BAR)
+venv\Lib\site-packages\click\_termui_impl.py:330:        during construction, and updates the progress bar *after* the
+venv\Lib\site-packages\click\_termui_impl.py:363:    """Decide what method to use for paging through text."""
+venv\Lib\site-packages\click\_termui_impl.py:451:    # but less is still alive, paging the output and messing up the terminal.
+venv\Lib\site-packages\click\_termui_impl.py:705:        # return \x00 when called a second time after pressing a regular key.
+venv\Lib\site-packages\click\_termui_impl.py:728:        # limited to the current 8-bit codepage.
+venv\Lib\site-packages\click\_winconsole.py:71:    # severely limited.
+venv\Lib\site-packages\colorama\ansi.py:36:class AnsiCursor(object):
+venv\Lib\site-packages\colorama\ansi.py:102:Cursor = AnsiCursor()
+venv\Lib\site-packages\colorama\ansitowin32.py:85:        # should we reset colors to defaults after every .write()
+venv\Lib\site-packages\colorama\ansitowin32.py:198:        cursor = 0
+venv\Lib\site-packages\colorama\ansitowin32.py:202:            self.write_plain_text(text, cursor, start)
+venv\Lib\site-packages\colorama\ansitowin32.py:204:            cursor = end
+venv\Lib\site-packages\colorama\ansitowin32.py:205:        self.write_plain_text(text, cursor, len(text))
+venv\Lib\site-packages\colorama\ansitowin32.py:251:        elif command in 'Hf':     # cursor position - absolute
+venv\Lib\site-packages\colorama\ansitowin32.py:252:            winterm.set_cursor_position(params, on_stderr=self.on_stderr)
+venv\Lib\site-packages\colorama\ansitowin32.py:253:        elif command in 'ABCD':   # cursor position - relative
+venv\Lib\site-packages\colorama\ansitowin32.py:257:            winterm.cursor_adjust(x, y, on_stderr=self.on_stderr)
+venv\Lib\site-packages\colorama\win32.py:27:            ("dwCursorPosition", COORD),
+venv\Lib\site-packages\colorama\win32.py:35:                , self.dwCursorPosition.Y, self.dwCursorPosition.X
+venv\Lib\site-packages\colorama\win32.py:61:    _SetConsoleCursorPosition = windll.kernel32.SetConsoleCursorPosition
+venv\Lib\site-packages\colorama\win32.py:62:    _SetConsoleCursorPosition.argtypes = [
+venv\Lib\site-packages\colorama\win32.py:66:    _SetConsoleCursorPosition.restype = wintypes.BOOL
+venv\Lib\site-packages\colorama\win32.py:129:    def SetConsoleCursorPosition(stream_id, position, adjust=True):
+venv\Lib\site-packages\colorama\win32.py:134:        # Adjust for Windows' SetConsoleCursorPosition:
+venv\Lib\site-packages\colorama\win32.py:145:        return _SetConsoleCursorPosition(handle, adjusted_position)
+venv\Lib\site-packages\colorama\winterm.py:92:        position = win32.GetConsoleScreenBufferInfo(handle).dwCursorPosition
+venv\Lib\site-packages\colorama\winterm.py:94:        # and win32.SetConsoleCursorPosition expects 1-based.
+venv\Lib\site-packages\colorama\winterm.py:99:    def set_cursor_position(self, position=None, on_stderr=False):
+venv\Lib\site-packages\colorama\winterm.py:107:        win32.SetConsoleCursorPosition(handle, position)
+venv\Lib\site-packages\colorama\winterm.py:109:    def cursor_adjust(self, x, y, on_stderr=False):
+venv\Lib\site-packages\colorama\winterm.py:115:        win32.SetConsoleCursorPosition(handle, adjusted_position, adjust=False)
+venv\Lib\site-packages\colorama\winterm.py:118:        # 0 should clear from the cursor to the end of the screen.
+venv\Lib\site-packages\colorama\winterm.py:119:        # 1 should clear from the cursor to the beginning of the screen.
+venv\Lib\site-packages\colorama\winterm.py:120:        # 2 should clear the entire screen, and move cursor to (1,1)
+venv\Lib\site-packages\colorama\winterm.py:127:        # get number of character cells before current cursor position
+venv\Lib\site-packages\colorama\winterm.py:128:        cells_before_cursor = csbi.dwSize.X * csbi.dwCursorPosition.Y + csbi.dwCursorPosition.X
+venv\Lib\site-packages\colorama\winterm.py:130:            from_coord = csbi.dwCursorPosition
+venv\Lib\site-packages\colorama\winterm.py:131:            cells_to_erase = cells_in_screen - cells_before_cursor
+venv\Lib\site-packages\colorama\winterm.py:134:            cells_to_erase = cells_before_cursor
+venv\Lib\site-packages\colorama\winterm.py:146:            # put the cursor where needed
+venv\Lib\site-packages\colorama\winterm.py:147:            win32.SetConsoleCursorPosition(handle, (1, 1))
+venv\Lib\site-packages\colorama\winterm.py:150:        # 0 should clear from the cursor to the end of the line.
+venv\Lib\site-packages\colorama\winterm.py:151:        # 1 should clear from the cursor to the beginning of the line.
+venv\Lib\site-packages\colorama\winterm.py:158:            from_coord = csbi.dwCursorPosition
+venv\Lib\site-packages\colorama\winterm.py:159:            cells_to_erase = csbi.dwSize.X - csbi.dwCursorPosition.X
+venv\Lib\site-packages\colorama\winterm.py:161:            from_coord = win32.COORD(0, csbi.dwCursorPosition.Y)
+venv\Lib\site-packages\colorama\winterm.py:162:            cells_to_erase = csbi.dwCursorPosition.X
+venv\Lib\site-packages\colorama\winterm.py:164:            from_coord = win32.COORD(0, csbi.dwCursorPosition.Y)
+venv\Lib\site-packages\colorama\__init__.py:3:from .ansi import Fore, Back, Style, Cursor
+venv\Lib\site-packages\crcmod\crcmod.py:7:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\crcmod\crcmod.py:16:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\crcmod\predefined.py:6:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\crcmod\predefined.py:15:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\crcmod\test.py:7:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\crcmod\test.py:16:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\crcmod\test.py:454:                # Check that crc1 maintains its same value, after .new() call.
+venv\Lib\site-packages\crcmod\test.py:462:                # Check that crc1 maintains its same value, after crc2 has called .update()
+venv\Lib\site-packages\crcmod\test.py:464:                # Check that crc2 contains the right value after calling .update()
+venv\Lib\site-packages\crcmod\_crcfunpy.py:12:# in the Software without restriction, including without limitation the rights
+venv\Lib\site-packages\crcmod\_crcfunpy.py:21:# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+venv\Lib\site-packages\Crypto\Cipher\AES.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\ARC2.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\ARC2.py:143:            If not specified, no limitation is applied.
+venv\Lib\site-packages\Crypto\Cipher\ARC4.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\Blowfish.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\CAST.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\ChaCha20.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\ChaCha20.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\ChaCha20_Poly1305.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\ChaCha20_Poly1305.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\DES.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\DES3.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\PKCS1_OAEP.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\PKCS1_v1_5.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\Salsa20.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\_EKSBlowfish.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_EKSBlowfish.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_cbc.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_cbc.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_cbc.py:162:            raise TypeError("encrypt() cannot be called after decrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_cbc.py:225:            raise TypeError("decrypt() cannot be called after encrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:166:        # Allowed transitions after initialization
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:266:                            " immediately after initialization")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:349:            raise TypeError("encrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_ccm.py:429:                            " after initialization or an update()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_cfb.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\_mode_cfb.py:158:            raise TypeError("encrypt() cannot be called after decrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_cfb.py:219:            raise TypeError("decrypt() cannot be called after encrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ctr.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\_mode_ctr.py:185:            raise TypeError("encrypt() cannot be called after decrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ctr.py:249:            raise TypeError("decrypt() cannot be called after encrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:92:        # Allowed transitions after initialization
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:150:                                " immediately after initialization")
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:192:            raise TypeError("encrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_eax.py:237:                            " after initialization or an update()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ecb.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:209:        # Allowed transitions after initialization
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:287:                            " immediately after initialization")
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:368:            raise TypeError("encrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_gcm.py:422:                            " after initialization or an update()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:144:        # Allowed transitions after initialization
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:229:                            " immediately after initialization")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:310:        After the entire plaintext has been passed (but before `digest`),
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:327:            raise TypeError("encrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:339:        After the entire ciphertext has been passed (but before `verify`),
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:356:            raise TypeError("decrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:389:        Call this method after the final `encrypt` (the one with no arguments)
+venv\Lib\site-packages\Crypto\Cipher\_mode_ocb.py:422:        Call this method after the final `decrypt` (the one with no arguments)
+venv\Lib\site-packages\Crypto\Cipher\_mode_ofb.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Cipher\_mode_ofb.py:155:            raise TypeError("encrypt() cannot be called after decrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_ofb.py:216:            raise TypeError("decrypt() cannot be called after encrypt()")
+venv\Lib\site-packages\Crypto\Cipher\_mode_openpgp.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_openpgp.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_openpgp.py:66:        self._done_first_block = False  # True after the first encryption
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:125:        # Allowed transitions after initialization
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:169:                                " immediately after initialization")
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:295:            raise TypeError("encrypt() can only be called after"
+venv\Lib\site-packages\Crypto\Cipher\_mode_siv.py:341:                            " after initialization or an update()")
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:76:    def __init__(self, data, key, digest_bytes, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:81:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:109:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:213:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:214:            Optional. By default, a hash object cannot be updated anymore after
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:223:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\BLAKE2b.py:247:    return BLAKE2b_Hash(data, key, digest_bytes, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:76:    def __init__(self, data, key, digest_bytes, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:81:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:109:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:213:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:214:            Optional. By default, a hash object cannot be updated anymore after
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:223:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\BLAKE2s.py:247:    return BLAKE2s_Hash(data, key, digest_bytes, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:52:                 update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:61:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:118:        if self._mac_tag is not None and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:119:            raise TypeError("update() cannot be called after digest() or verify()")
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:194:        if self._mac_tag is not None and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:260:        update_after_digest=False):
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:283:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:284:            Optional. By default, a hash object cannot be updated anymore after
+venv\Lib\site-packages\Crypto\Hash\CMAC.py:306:                update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\cSHAKE128.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\cSHAKE128.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\cSHAKE128.py:128:            raise TypeError("You cannot call 'update' after the first 'read'")
+venv\Lib\site-packages\Crypto\Hash\cSHAKE128.py:143:            You cannot use :meth:`update` anymore after the first call to
+venv\Lib\site-packages\Crypto\Hash\cSHAKE256.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\cSHAKE256.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\HMAC.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\HMAC.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\KangarooTwelve.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\KangarooTwelve.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\KangarooTwelve.py:93:            raise TypeError("You cannot call 'update' after the first 'read'")
+venv\Lib\site-packages\Crypto\Hash\KangarooTwelve.py:159:            You cannot use :meth:`update` anymore after the first call to
+venv\Lib\site-packages\Crypto\Hash\keccak.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\keccak.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\keccak.py:69:    def __init__(self, data, digest_bytes, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\keccak.py:73:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\keccak.py:95:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\keccak.py:154:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\keccak.py:162:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\keccak.py:181:    return Keccak_Hash(data, digest_bytes, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\KMAC128.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\KMAC128.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\KMAC256.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\KMAC256.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\MD2.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\MD2.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\MD4.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\MD4.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\MD4.py:119:        You can continue updating the object after calling this function.
+venv\Lib\site-packages\Crypto\Hash\MD5.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\Poly1305.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\RIPEMD.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\RIPEMD160.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\RIPEMD160.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\SHA.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA1.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA224.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA256.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA384.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:52:    def __init__(self, data, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:53:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:76:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:141:        return type(self)(data, self._update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:151:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:159:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\SHA3_224.py:168:    return SHA3_224_Hash(data, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:52:    def __init__(self, data, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:53:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:76:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:141:        return type(self)(data, self._update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:151:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:159:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\SHA3_256.py:168:    return SHA3_256_Hash(data, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:52:    def __init__(self, data, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:53:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:76:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:140:        return type(self)(data, self._update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:146:        return type(self)(data, self._update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:156:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:164:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\SHA3_384.py:173:    return SHA3_384_Hash(data, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:52:    def __init__(self, data, update_after_digest):
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:53:        self._update_after_digest = update_after_digest
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:76:        if self._digest_done and not self._update_after_digest:
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:141:        return type(self)(data, self._update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:151:        update_after_digest (boolean):
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:159:    update_after_digest = kwargs.pop("update_after_digest", False)
+venv\Lib\site-packages\Crypto\Hash\SHA3_512.py:168:    return SHA3_512_Hash(data, update_after_digest)
+venv\Lib\site-packages\Crypto\Hash\SHA512.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Hash\SHAKE128.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\SHAKE128.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\SHAKE128.py:76:            raise TypeError("You cannot call 'update' after the first 'read'")
+venv\Lib\site-packages\Crypto\Hash\SHAKE128.py:91:            You cannot use :meth:`update` anymore after the first call to
+venv\Lib\site-packages\Crypto\Hash\SHAKE256.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\SHAKE256.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\SHAKE256.py:77:            raise TypeError("You cannot call 'update' after the first 'read'")
+venv\Lib\site-packages\Crypto\Hash\SHAKE256.py:92:            You cannot use :meth:`update` anymore after the first call to
+venv\Lib\site-packages\Crypto\Hash\TupleHash128.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\TupleHash128.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\TupleHash128.py:59:            raise TypeError("You cannot call 'update' after 'digest' or 'hexdigest'")
+venv\Lib\site-packages\Crypto\Hash\TupleHash256.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Hash\TupleHash256.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Hash\TurboSHAKE128.py:45:            raise TypeError("You cannot call 'update' after the first 'read'")
+venv\Lib\site-packages\Crypto\Hash\TurboSHAKE128.py:60:            You cannot use :meth:`update` anymore after the first call to
+venv\Lib\site-packages\Crypto\Hash\__init__.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\IO\PEM.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\IO\PEM.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\IO\PKCS8.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\IO\PKCS8.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\IO\_PBES.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\IO\_PBES.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\IO\__init__.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\IO\__init__.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\Numbers.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\Numbers.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\Primality.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\Primality.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\_IntegerBase.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\_IntegerBase.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\_IntegerCustom.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\_IntegerCustom.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\_IntegerGMP.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\_IntegerGMP.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Math\_IntegerNative.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Math\_IntegerNative.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Protocol\HPKE.py:34:class MessageLimitReachedError(ValueError):
+venv\Lib\site-packages\Crypto\Protocol\HPKE.py:303:            raise MessageLimitReachedError()
+venv\Lib\site-packages\Crypto\Protocol\KDF.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Protocol\KDF.py:249:        :Raise TypeError: when the limit on the number of components has been reached.
+venv\Lib\site-packages\Crypto\Protocol\SecretSharing.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Protocol\SecretSharing.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\Protocol\__init__.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\Protocol\__init__.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\PublicKey\DSA.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\PublicKey\ECC.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\PublicKey\ECC.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\PublicKey\ElGamal.py:17:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\PublicKey\RSA.py:20:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\PublicKey\RSA.py:24:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\PublicKey\_openssh.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\PublicKey\_openssh.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\PublicKey\__init__.py:12:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Random\random.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\Random\__init__.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\common.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_AES.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ARC2.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ARC4.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_Blowfish.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CAST.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CBC.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CBC.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CCM.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CCM.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CCM.py:632:    def test_invalid_encrypt_or_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CCM.py:643:    def test_invalid_decrypt_or_update_after_verify(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CFB.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CFB.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20_Poly1305.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20_Poly1305.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20_Poly1305.py:494:    def test_invalid_encrypt_or_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_ChaCha20_Poly1305.py:507:    def test_invalid_decrypt_or_update_after_verify(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CTR.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_CTR.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES3.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES3.py:84:        after_2k = DES3.adjust_key_parity(before_2k)
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES3.py:85:        self.assertEqual(after_2k,
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES3.py:90:        after_3k = DES3.adjust_key_parity(before_3k)
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_DES3.py:91:        self.assertEqual(after_3k,
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_EAX.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_EAX.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_EAX.py:516:    def test_invalid_encrypt_or_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_EAX.py:527:    def test_invalid_decrypt_or_update_after_verify(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_GCM.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_GCM.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_GCM.py:492:    def test_invalid_encrypt_or_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_GCM.py:503:    def test_invalid_decrypt_or_update_after_verify(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:399:    def test_invalid_encrypt_after_final(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:407:    def test_invalid_decrypt_after_final(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:482:    def test_invalid_encrypt_or_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OCB.py:494:    def test_invalid_decrypt_or_update_after_verify(self):
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OFB.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OFB.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OpenPGP.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OpenPGP.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_OpenPGP.py:150:        #   look for tag 11 (Literal Data  Packet); in its payload, after a short
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_pkcs1_15.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_pkcs1_oaep.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_Salsa20.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_SIV.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\test_SIV.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Cipher\__init__.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\common.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_BLAKE2.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_BLAKE2.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_BLAKE2.py:115:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_BLAKE2.py:118:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_BLAKE2.py:125:        h = self.BLAKE2.new(digest_bits=256, data=msg[:4], update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_CMAC.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_CMAC.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_CMAC.py:275:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_CMAC.py:279:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_CMAC.py:286:        h2 = CMAC.new(key, msg[:4], ciphermod=AES, update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_cSHAKE.py:15:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_cSHAKE.py:19:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_cSHAKE.py:104:    def test_update_after_read(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_HMAC.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_KangarooTwelve.py:15:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_KangarooTwelve.py:19:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_KangarooTwelve.py:92:    def test_update_after_read(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_keccak.py:19:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_keccak.py:23:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_keccak.py:120:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_keccak.py:123:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_keccak.py:130:        h = keccak.new(digest_bits=512, data=msg[:4], update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_KMAC.py:75:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_KMAC.py:78:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_MD2.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_MD4.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_MD5.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_Poly1305.py:22:# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_Poly1305.py:26:# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_Poly1305.py:363:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_Poly1305.py:366:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_RIPEMD160.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA1.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA224.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA256.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA384.py:16:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_224.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_224.py:36:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_224.py:39:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_224.py:46:        h = SHA3.new(data=msg[:4], update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_256.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_256.py:36:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_256.py:39:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_256.py:46:        h = SHA3.new(data=msg[:4], update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_384.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_384.py:36:    def test_update_after_digest(self):
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_384.py:39:        # Normally, update() cannot be done after digest()
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_384.py:46:        h = SHA3.new(data=msg[:4], update_after_digest=True)
+venv\Lib\site-packages\Crypto\SelfTest\Hash\test_SHA3_512.py:14:# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+venv\Lib\site-packages\Cryp

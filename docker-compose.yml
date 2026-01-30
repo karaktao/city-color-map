@@ -1,0 +1,33 @@
+services:
+  api:
+    build: .
+    container_name: city-color-map-api
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - MAPILLARY_TOKEN=${MAPILLARY_TOKEN}
+    command: ["python","-m","uvicorn","src.api_main:app","--host","0.0.0.0","--port","8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - projects_data:/app/projects
+      - weights_data:/app/weights
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build: ./web
+    container_name: city-color-map-web
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  projects_data:
+  weights_data:

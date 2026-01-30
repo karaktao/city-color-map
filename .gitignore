@@ -28,3 +28,7 @@ Thumbs.db
 
 # logs
 *.log
+
+projects-baocun/
+weights/
+Dockerfile copy

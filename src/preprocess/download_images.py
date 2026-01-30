@@ -1,6 +1,9 @@
 """
 download_images.py
-修改版：支持 yield 生成器日志输出，供 FastAPI 流式传输使用。
+
+Modified version:
+    Supports generator-based (yield) log output,
+    designed for FastAPI streaming responses.
 """
 
 from pathlib import Path
@@ -12,16 +15,19 @@ import time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# 设置缩放后的最长边（像素）
+# Maximum length of the longest image side after resizing (pixels)
 MAX_LONG_SIDE = 512
 
 
 def _resize_keep_ratio(img_bgr, max_long_side=MAX_LONG_SIDE):
-    """按比例缩放，使最长边不超过 max_long_side"""
+    """
+    Resize the image while keeping aspect ratio,
+    ensuring the longest side does not exceed max_long_side.
+    """
     h, w = img_bgr.shape[:2]
     long_side = max(h, w)
     if long_side <= max_long_side:
-        return img_bgr  # 已经够小了
+        return img_bgr  # Already small enough
 
     scale = max_long_side / long_side
     new_w = int(round(w * scale))
@@ -32,8 +38,9 @@ def _resize_keep_ratio(img_bgr, max_long_side=MAX_LONG_SIDE):
 
 def run_download_images(project_dir):
     """
-    生成器函数：
-    逐步 yield 日志字符串，而不是一次性执行完毕。
+    Generator function:
+    Gradually yields log strings instead of executing everything at once.
+    Intended for FastAPI streaming output.
     """
     project_dir = Path(project_dir)
     csv_path = project_dir / "data" / "csv" / "images_meta.csv"
@@ -41,24 +48,24 @@ def run_download_images(project_dir):
     img_dir.mkdir(parents=True, exist_ok=True)
 
     if not csv_path.exists():
-        yield f"[WARN] 未找到 {csv_path}，请先运行 parse_json\n"
+        yield f"[WARN] CSV file not found: {csv_path}. Please run parse_json first.\n"
         return
 
-    # 1. 先读取所有行，获取总数（为了显示进度条）
+    # 1. Read all rows first to get total count (for progress display)
     rows = []
     with csv_path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
-    
-    total_count = len(rows)
-    yield f"[INFO] 共发现 {total_count} 张图片记录，准备开始处理...\n"
 
-    # 2. 遍历下载
+    total_count = len(rows)
+    yield f"[INFO] Found {total_count} image records. Starting processing...\n"
+
+    # 2. Iterate and download images
     for index, row in enumerate(rows):
         img_id = row.get("id")
         url = row.get("thumb_2048_url")
-        
-        # 进度前缀，例如 [1/50]
+
+        # Progress prefix, e.g. [1/50]
         prefix = f"[{index + 1}/{total_count}]"
 
         if not img_id or not url:
@@ -66,47 +73,48 @@ def run_download_images(project_dir):
 
         out_path = img_dir / f"{img_id}.jpg"
         if out_path.exists():
-            # yield f"[INFO] {prefix} 已存在，跳过 {img_id}\n"
-            # 如果不想刷屏，可以注释掉跳过的日志，或者只 yield 简短信息
+            # yield f"[INFO] {prefix} Already exists, skipping {img_id}\n"
+            # To avoid flooding logs, skip messages can be commented out
             continue
 
-        yield f"[INFO] {prefix} 正在下载 {img_id} ...\n"
-        
+        yield f"[INFO] {prefix} Downloading {img_id} ...\n"
+
         try:
             resp = requests.get(url, timeout=60)
             resp.raise_for_status()
 
-            # ---- 1. 把字节解码成 BGR 图像 ----
+            # ---- 1. Decode bytes into a BGR image ----
             data = np.frombuffer(resp.content, np.uint8)
             img_bgr = cv2.imdecode(data, cv2.IMREAD_COLOR)
-            
+
             if img_bgr is None:
-                yield f"[WARN] {prefix} 解码失败，跳过 {img_id}\n"
+                yield f"[WARN] {prefix} Failed to decode image, skipping {img_id}\n"
                 continue
 
-            # ---- 2. 压缩：缩小分辨率 ----
+            # ---- 2. Resize: reduce resolution ----
             img_small = _resize_keep_ratio(img_bgr, MAX_LONG_SIDE)
 
-            # ---- 3. 保存压缩后的图片 ----
+            # ---- 3. Save resized image ----
             cv2.imwrite(str(out_path), img_small)
-            
-            # (可选) 稍微停顿一下，防止下载太快让前端来不及渲染（通常网络IO已经够慢了，不需要sleep）
-            # time.sleep(0.05) 
+
+            # (Optional) Small delay to avoid overwhelming the frontend renderer
+            # time.sleep(0.05)
 
         except Exception as e:
-            yield f"[WARN] {prefix} 下载或保存 {img_id} 失败: {e}\n"
+            yield f"[WARN] {prefix} Failed to download or save {img_id}: {e}\n"
 
-    yield f"[SUCCESS] ✅ 所有图片处理完成。\n"
+    yield "[SUCCESS] ✅ All images have been processed.\n"
 
 
 def _cli_default():
     """
-    直接运行本脚本时的兼容处理：
-    遍历生成器并打印，保持原本的 CLI 体验。
+    Compatibility mode for direct script execution:
+    Iterates through the generator and prints logs,
+    preserving the original CLI behavior.
     """
-    print("正在运行 download_images CLI 模式...")
+    print("Running download_images in CLI mode...")
     for log in run_download_images(PROJECT_ROOT):
-        print(log, end="") # log 已经包含了 \n，所以 end=""
+        print(log, end="")  # log already contains '\n'
 
 
 if __name__ == "__main__":
