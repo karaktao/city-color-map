@@ -7,7 +7,7 @@ City Color Map is a web-based system for **extracting dominant building façade 
 It integrates **Mapillary street images**, **deep-learning-based semantic segmentation**, and **GIS visualization** for urban analysis and design research.
 
 <p align="center">
-  <img src="data/images/image.png" width="800">
+  <img src="images/image.png" width="800">
 </p>
 ---
 
